@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+venv/
+.venv/
+env/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Machine learning temporary files
+*.tmp
+
+# Frontend dependencies and builds
+node_modules/
+dist/
+
+# Operating system files
+.DS_Store
+
+# Editors
+.vscode/
+.idea/

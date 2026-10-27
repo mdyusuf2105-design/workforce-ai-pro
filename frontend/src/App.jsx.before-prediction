@@ -1,0 +1,675 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import axios from "axios";
+import {
+  Activity, Users, Building2, Search, LogOut,
+  LayoutDashboard, ShieldCheck, RefreshCw, UserRound,
+  BriefcaseBusiness, AlertCircle, BrainCircuit, History,
+  TrendingUp, Clock3, ChartNoAxesCombined, CircleAlert,
+} from "lucide-react";
+import {
+  ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+} from "recharts";
+import "./App.css";
+
+const API = "http://127.0.0.1:8000/api";
+const client = axios.create({ baseURL: API });
+
+client.interceptors.request.use((config) => {
+  const token = localStorage.getItem("wf_token");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+const RISK_COLORS = {
+  HIGH: "#dc5454",
+  MEDIUM: "#e8a33e",
+  LOW: "#239b77",
+};
+
+function formatDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+}
+
+function riskLabel(value) {
+  return String(value || "UNKNOWN").toUpperCase();
+}
+
+function App() {
+  const [token, setToken] = useState(() => localStorage.getItem("wf_token"));
+  const [user, setUser] = useState(null);
+  const [employees, setEmployees] = useState([]);
+  const [predictions, setPredictions] = useState([]);
+  const [search, setSearch] = useState("");
+  const [authMode, setAuthMode] = useState("login");
+  const [loading, setLoading] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [activeView, setActiveView] = useState("dashboard");
+  const [credentials, setCredentials] = useState({
+    full_name: "",
+    email: "",
+    password: "",
+  });
+
+  const loadDashboard = useCallback(async () => {
+    if (!token) return;
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const [profileResponse, employeeResponse] = await Promise.all([
+        client.get("/auth/me"),
+        client.get("/employees/", {
+          params: { search: search || undefined, limit: 100 },
+        }),
+      ]);
+
+      setUser(profileResponse.data);
+      setEmployees(Array.isArray(employeeResponse.data) ? employeeResponse.data : []);
+
+      const role = String(profileResponse.data?.role || "").toUpperCase();
+
+      if (["ADMIN", "HR"].includes(role)) {
+        try {
+          const historyResponse = await client.get("/attrition/history", {
+            params: { limit: 200 },
+          });
+          setPredictions(
+            Array.isArray(historyResponse.data) ? historyResponse.data : []
+          );
+        } catch (historyError) {
+          setPredictions([]);
+          if (historyError.response?.status === 401) {
+            setError("Your session has expired. Please sign in again.");
+          } else if (historyError.response?.status === 403) {
+            setError("Your account cannot access prediction history.");
+          } else {
+            setError(
+              historyError.response?.data?.detail ||
+              "Could not load attrition history. Check the backend."
+            );
+          }
+        }
+      } else {
+        setPredictions([]);
+      }
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 401) {
+        localStorage.removeItem("wf_token");
+        setToken(null);
+        setUser(null);
+        setEmployees([]);
+        setPredictions([]);
+        setError("Your session expired. Please log in again.");
+      } else {
+        setError(
+          err.response?.data?.detail ||
+          "Unable to load the dashboard. Check that the backend is running."
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [token, search]);
+
+  useEffect(() => {
+    if (token) loadDashboard();
+  }, [token, loadDashboard]);
+
+  async function handleAuth(event) {
+    event.preventDefault();
+    setAuthLoading(true);
+    setError("");
+    setNotice("");
+
+    try {
+      if (authMode === "register") {
+        await axios.post(`${API}/auth/register`, {
+          full_name: credentials.full_name,
+          email: credentials.email,
+          password: credentials.password,
+        });
+        setNotice("Account created. You can now sign in.");
+        setAuthMode("login");
+        setCredentials((previous) => ({
+          ...previous,
+          password: "",
+        }));
+      } else {
+        const response = await axios.post(`${API}/auth/login`, {
+          email: credentials.email,
+          password: credentials.password,
+        });
+        localStorage.setItem("wf_token", response.data.access_token);
+        setToken(response.data.access_token);
+      }
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+        "Request failed. Make sure the backend is running."
+      );
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem("wf_token");
+    setToken(null);
+    setUser(null);
+    setEmployees([]);
+    setPredictions([]);
+    setCredentials({ full_name: "", email: "", password: "" });
+    setError("");
+    setNotice("");
+    setActiveView("dashboard");
+  }
+
+  const departments = useMemo(
+    () => new Set(employees.map((employee) => employee.department).filter(Boolean)).size,
+    [employees]
+  );
+
+  const activeCount = useMemo(
+    () => employees.filter((employee) => employee.employment_status === "ACTIVE").length,
+    [employees]
+  );
+
+  const riskCounts = useMemo(() => {
+    const counts = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+    predictions.forEach((prediction) => {
+      const level = riskLabel(prediction.risk_level);
+      if (Object.hasOwn(counts, level)) counts[level] += 1;
+    });
+    return counts;
+  }, [predictions]);
+
+  const riskChartData = useMemo(
+    () => [
+      { name: "High risk", level: "HIGH", value: riskCounts.HIGH },
+      { name: "Medium risk", level: "MEDIUM", value: riskCounts.MEDIUM },
+      { name: "Low risk", level: "LOW", value: riskCounts.LOW },
+    ],
+    [riskCounts]
+  );
+
+  const historyChartData = useMemo(() => {
+    const buckets = new Map();
+    [...predictions].reverse().forEach((prediction) => {
+      const date = new Date(prediction.created_at);
+      if (Number.isNaN(date.getTime())) return;
+      const key = date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      });
+      if (!buckets.has(key)) {
+        buckets.set(key, { date: key, HIGH: 0, MEDIUM: 0, LOW: 0 });
+      }
+      const level = riskLabel(prediction.risk_level);
+      if (Object.hasOwn(buckets.get(key), level)) buckets.get(key)[level] += 1;
+    });
+    return Array.from(buckets.values()).slice(-7);
+  }, [predictions]);
+
+  const isAnalyticsRole = ["ADMIN", "HR"].includes(
+    String(user?.role || "").toUpperCase()
+  );
+
+  if (!token) {
+    return (
+      <main className="auth-page">
+        <section className="auth-visual">
+          <div className="brand">
+            <span className="brand-mark">W</span> Workforce AI Pro
+          </div>
+          <div className="visual-copy">
+            <span className="eyebrow">WORKFORCE INTELLIGENCE PLATFORM</span>
+            <h1>Understand your people. Build a stronger workforce.</h1>
+            <p>
+              Bring employee management and workforce intelligence into one
+              secure workspace.
+            </p>
+            <div className="visual-stats">
+              <div><ShieldCheck size={20} /><span>Secure access</span></div>
+              <div><Activity size={20} /><span>Workforce analytics</span></div>
+            </div>
+          </div>
+          <span className="visual-footer">
+            Workforce intelligence for better decisions.
+          </span>
+        </section>
+
+        <section className="auth-panel">
+          <form className="auth-form" onSubmit={handleAuth}>
+            <div className="mobile-brand">WorkForce AI Pro</div>
+            <span className="eyebrow">
+              {authMode === "login" ? "WELCOME BACK" : "GET STARTED"}
+            </span>
+            <h2>
+              {authMode === "login" ? "Sign in to your account" : "Create your account"}
+            </h2>
+            <p className="muted">
+              {authMode === "login"
+                ? "Enter your credentials to continue."
+                : "New accounts receive the Employee role by default."}
+            </p>
+
+            {authMode === "register" && (
+              <label>Full name
+                <input
+                  required minLength={2} maxLength={120}
+                  value={credentials.full_name}
+                  onChange={(event) =>
+                    setCredentials({ ...credentials, full_name: event.target.value })
+                  }
+                  placeholder="Your full name"
+                />
+              </label>
+            )}
+
+            <label>Email address
+              <input
+                type="email" required
+                value={credentials.email}
+                onChange={(event) =>
+                  setCredentials({ ...credentials, email: event.target.value })
+                }
+                placeholder="you@company.com"
+              />
+            </label>
+
+            <label>Password
+              <input
+                type="password" required
+                minLength={authMode === "register" ? 12 : 1}
+                value={credentials.password}
+                onChange={(event) =>
+                  setCredentials({ ...credentials, password: event.target.value })
+                }
+                placeholder={authMode === "register" ? "At least 12 characters" : "Enter your password"}
+              />
+            </label>
+
+            {error && <div className="alert error"><AlertCircle size={17} />{String(error)}</div>}
+            {notice && <div className="alert success">{notice}</div>}
+
+            <button className="primary-btn" disabled={authLoading}>
+              {authLoading
+                ? "Please wait..."
+                : authMode === "login" ? "Sign in" : "Create account"}
+            </button>
+
+            <p className="switch-auth">
+              {authMode === "login" ? "Don't have an account?" : "Already registered?"}
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode(authMode === "login" ? "register" : "login");
+                  setError("");
+                  setNotice("");
+                }}
+              >
+                {authMode === "login" ? "Create account" : "Sign in"}
+              </button>
+            </p>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-mark">W</span>
+          <span>WorkForce <small>AI PRO</small></span>
+        </div>
+
+        <div className="workspace-label">WORKSPACE</div>
+        <button
+          className={`nav-item ${activeView === "dashboard" ? "selected" : ""}`}
+          onClick={() => setActiveView("dashboard")}
+        >
+          <LayoutDashboard size={18} />Dashboard
+        </button>
+        <button
+          className={`nav-item ${activeView === "employees" ? "selected" : ""}`}
+          onClick={() => setActiveView("employees")}
+        >
+          <Users size={18} />Employees
+        </button>
+        <button
+          className={`nav-item ${activeView === "departments" ? "selected" : ""}`}
+          onClick={() => setActiveView("departments")}
+        >
+          <Building2 size={18} />Departments
+        </button>
+        {isAnalyticsRole && (
+          <button
+            className={`nav-item ${activeView === "insights" ? "selected" : ""}`}
+            onClick={() => setActiveView("insights")}
+          >
+            <BrainCircuit size={18} />Workforce insights
+          </button>
+        )}
+
+        <div className="sidebar-bottom">
+          <div className="secure-note">
+            <ShieldCheck size={17} />
+            <span>Authenticated session<br /><small>JWT security enabled</small></span>
+          </div>
+          <button className="logout-btn" onClick={logout}>
+            <LogOut size={17} />Sign out
+          </button>
+        </div>
+      </aside>
+
+      <main className="main-panel">
+        <header className="topbar">
+          <div><span className="breadcrumb">Workspace /</span> {
+            activeView === "insights" ? "Workforce insights" :
+            activeView === "employees" ? "Employees" :
+            activeView === "departments" ? "Departments" : "Dashboard"
+          }</div>
+          <div className="profile-chip">
+            <div className="avatar">
+              {user?.full_name?.charAt(0)?.toUpperCase() || "U"}
+            </div>
+            <div className="profile-details">
+              <strong>{user?.full_name || "User"}</strong>
+              <span>{user?.role || "EMPLOYEE"}</span>
+            </div>
+          </div>
+        </header>
+
+        <div className="page-content">
+          <div className="page-heading">
+            <div>
+              <span className="eyebrow">
+                {activeView === "insights" ? "AI WORKFORCE INTELLIGENCE" : "OVERVIEW"}
+              </span>
+              <h1>
+                {activeView === "insights" ? "Attrition analytics" :
+                 activeView === "employees" ? "Employee directory" :
+                 activeView === "departments" ? "Department overview" :
+                 "Workforce dashboard"}
+              </h1>
+              <p className="muted">
+                {activeView === "insights"
+                  ? "Explore saved experimental attrition predictions."
+                  : "Monitor employee records and workforce activity."}
+              </p>
+            </div>
+            <button className="secondary-btn" onClick={loadDashboard} disabled={loading}>
+              <RefreshCw size={16} className={loading ? "spin" : ""} />
+              Refresh
+            </button>
+          </div>
+
+          {error && <div className="alert error"><AlertCircle size={17} />{String(error)}</div>}
+
+          {activeView === "dashboard" && (
+            <>
+              <section className="stat-grid">
+                <StatCard icon={<Users />} label="Employees loaded" value={employees.length} note="Records returned by API" />
+                <StatCard icon={<UserRound />} label="Active employees" value={activeCount} note="Based on employee status" />
+                <StatCard icon={<Building2 />} label="Departments" value={departments} note="Unique departments represented" />
+                <StatCard icon={<BriefcaseBusiness />} label="Your role" value={user?.role || "—"} note="Access level for this account" />
+              </section>
+
+              {isAnalyticsRole && (
+                <>
+                  <section className="section-title">
+                    <div>
+                      <h2>Attrition risk overview</h2>
+                      <p className="muted">Counts are calculated from saved API predictions.</p>
+                    </div>
+                    <button className="text-link" onClick={() => setActiveView("insights")}>
+                      View analytics <TrendingUp size={15} />
+                    </button>
+                  </section>
+                  <RiskCards counts={riskCounts} total={predictions.length} />
+                </>
+              )}
+
+              <EmployeeTable employees={employees} loading={loading} search={search} setSearch={setSearch} />
+
+              {isAnalyticsRole && (
+                <PredictionHistory predictions={predictions.slice(0, 5)} loading={loading} compact />
+              )}
+            </>
+          )}
+
+          {activeView === "employees" && (
+            <EmployeeTable employees={employees} loading={loading} search={search} setSearch={setSearch} />
+          )}
+
+          {activeView === "departments" && (
+            <section className="department-grid">
+              {[...new Set(employees.map((employee) => employee.department).filter(Boolean))].map((department) => {
+                const departmentEmployees = employees.filter((employee) => employee.department === department);
+                return (
+                  <article className="department-card" key={department}>
+                    <div className="department-icon"><Building2 size={21} /></div>
+                    <h3>{department}</h3>
+                    <p>{departmentEmployees.length} employee(s)</p>
+                    <span className="muted">{departmentEmployees.filter((employee) => employee.employment_status === "ACTIVE").length} active</span>
+                  </article>
+                );
+              })}
+              {departments === 0 && <EmptyState message="No department records available." />}
+            </section>
+          )}
+
+          {activeView === "insights" && (
+            isAnalyticsRole ? (
+              <>
+                <div className="demo-notice">
+                  <CircleAlert size={18} />
+                  <div>
+                    <strong>Experimental model</strong>
+                    <p>Predictions use synthetic demo data and are not validated for real employment decisions.</p>
+                  </div>
+                </div>
+
+                <RiskCards counts={riskCounts} total={predictions.length} />
+
+                <section className="chart-grid">
+                  <article className="chart-card">
+                    <div className="chart-heading">
+                      <div><h2>Risk distribution</h2><p>Saved predictions by risk category</p></div>
+                    </div>
+                    {predictions.length === 0 ? <EmptyState message="No saved predictions yet." /> : (
+                      <div className="chart-body">
+                        <ResponsiveContainer width="100%" height={260}>
+                          <PieChart>
+                            <Pie data={riskChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={63} outerRadius={94} paddingAngle={4}>
+                              {riskChartData.map((entry) => (
+                                <Cell key={entry.level} fill={RISK_COLORS[entry.level]} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="chart-legend">
+                          {riskChartData.map((entry) => (
+                            <div key={entry.level}>
+                              <span className="legend-dot" style={{ background: RISK_COLORS[entry.level] }} />
+                              <span>{entry.name}</span><strong>{entry.value}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </article>
+
+                  <article className="chart-card">
+                    <div className="chart-heading">
+                      <div><h2>Prediction activity</h2><p>Daily saved predictions, up to seven dates</p></div>
+                    </div>
+                    {historyChartData.length === 0 ? <EmptyState message="Activity appears after predictions are saved." /> : (
+                      <div className="bar-chart-body">
+                        <ResponsiveContainer width="100%" height={310}>
+                          <BarChart data={historyChartData} margin={{ top: 10, right: 8, left: -18, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#edf0f5" />
+                            <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#8390a3" }} />
+                            <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#8390a3" }} />
+                            <Tooltip />
+                            <Bar dataKey="HIGH" stackId="risk" fill={RISK_COLORS.HIGH} radius={[0, 0, 0, 0]} />
+                            <Bar dataKey="MEDIUM" stackId="risk" fill={RISK_COLORS.MEDIUM} />
+                            <Bar dataKey="LOW" stackId="risk" fill={RISK_COLORS.LOW} radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </article>
+                </section>
+
+                <PredictionHistory predictions={predictions} loading={loading} />
+              </>
+            ) : (
+              <div className="alert error">Workforce insights are available to authorized HR and Admin users.</div>
+            )
+          )}
+
+          <footer className="page-footer">
+            WorkForce AI Pro <span>•</span> HR Attrition Prediction &amp; Workforce Intelligence
+          </footer>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function StatCard({ icon, label, value, note }) {
+  return (
+    <article className="stat-card">
+      <div className="stat-top"><span>{label}</span><span className="stat-icon">{icon}</span></div>
+      <div className="stat-value">{value}</div>
+      <div className="stat-note">{note}</div>
+    </article>
+  );
+}
+
+function RiskCards({ counts, total }) {
+  return (
+    <section className="risk-grid">
+      <article className="risk-card total">
+        <div className="risk-card-top"><span>Total predictions</span><span className="risk-card-icon"><History size={18} /></span></div>
+        <div className="risk-number">{total}</div>
+        <p>Saved prediction records</p>
+      </article>
+      {["HIGH", "MEDIUM", "LOW"].map((level) => (
+        <article className={`risk-card ${level.toLowerCase()}`} key={level}>
+          <div className="risk-card-top">
+            <span>{level.charAt(0) + level.slice(1).toLowerCase()} risk</span>
+            <span className="risk-card-icon"><Activity size={18} /></span>
+          </div>
+          <div className="risk-number">{counts[level]}</div>
+          <p>{total ? `${((counts[level] / total) * 100).toFixed(1)}% of saved predictions` : "No predictions yet"}</p>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function EmployeeTable({ employees, loading, search, setSearch }) {
+  return (
+    <section className="table-card">
+      <div className="table-heading">
+        <div><h2>Employee directory</h2><p className="muted">Live data from the FastAPI employee endpoint.</p></div>
+        <div className="search-box">
+          <Search size={17} />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search employees..." />
+        </div>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>EMPLOYEE</th><th>DEPARTMENT</th><th>JOB TITLE</th><th>STATUS</th></tr></thead>
+          <tbody>
+            {employees.map((employee) => (
+              <tr key={employee.id}>
+                <td><div className="employee-cell">
+                  <div className="employee-avatar">{employee.full_name?.charAt(0)?.toUpperCase() || "?"}</div>
+                  <div><strong>{employee.full_name}</strong><span>{employee.employee_code} · {employee.email}</span></div>
+                </div></td>
+                <td>{employee.department || "—"}</td>
+                <td>{employee.job_title || "—"}</td>
+                <td><span className={`status ${employee.employment_status === "ACTIVE" ? "active" : "inactive"}`}>{employee.employment_status}</span></td>
+              </tr>
+            ))}
+            {!loading && employees.length === 0 && (
+              <tr><td colSpan="4"><EmptyState message="No employee records found." /></td></tr>
+            )}
+            {loading && <tr><td colSpan="4" className="empty-state">Loading employee records...</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="table-footer">Showing {employees.length} record(s) · Connected to WorkForce AI Pro API</div>
+    </section>
+  );
+}
+
+function PredictionHistory({ predictions, loading, compact = false }) {
+  return (
+    <section className="table-card history-card">
+      <div className="table-heading">
+        <div>
+          <h2>{compact ? "Recent predictions" : "Prediction history"}</h2>
+          <p className="muted">Saved records from the attrition history API.</p>
+        </div>
+        <span className="history-count"><Clock3 size={14} />{predictions.length} record(s)</span>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>RECORD</th><th>EMPLOYEE ID</th><th>RISK LEVEL</th><th>PROBABILITY</th><th>CREATED AT</th></tr></thead>
+          <tbody>
+            {predictions.map((prediction) => {
+              const level = riskLabel(prediction.risk_level);
+              return (
+                <tr key={prediction.id}>
+                  <td>#{prediction.id}</td>
+                  <td>{prediction.employee_id}</td>
+                  <td><span className={`risk-badge ${level.toLowerCase()}`}>{level}</span></td>
+                  <td><div className="probability-cell">
+                    <span>{(Number(prediction.risk_probability) * 100).toFixed(1)}%</span>
+                    <div className="probability-track"><span style={{ width: `${Math.max(0, Math.min(100, Number(prediction.risk_probability) * 100))}%`, background: RISK_COLORS[level] || "#8b95a5" }} /></div>
+                  </div></td>
+                  <td>{formatDate(prediction.created_at)}</td>
+                </tr>
+              );
+            })}
+            {!loading && predictions.length === 0 && (
+              <tr><td colSpan="5"><EmptyState message="No saved predictions are available for this account." /></td></tr>
+            )}
+            {loading && <tr><td colSpan="5" className="empty-state">Loading prediction history...</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="table-footer">
+        Experimental estimates from synthetic demo data; not validated for real employment decisions.
+      </div>
+    </section>
+  );
+}
+
+function EmptyState({ message }) {
+  return <div className="empty-state"><ChartNoAxesCombined size={25} /><span>{message}</span></div>;
+}
+
+export default App;

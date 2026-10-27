@@ -1,0 +1,3034 @@
+import { useCallback, useEffect, useState } from "react";
+import axios from "axios";
+import {
+  RefreshCw,
+  Search,
+  AlertCircle,
+  CheckCircle2,
+  LoaderCircle,
+} from "lucide-react";
+
+const api = axios.create({
+  baseURL: "http://127.0.0.1:8000/api",
+});
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("wf_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+const MODULES = {
+  leaves: {
+    title: "Leave Management",
+    description: "Review employee leave requests and their current status.",
+    endpoint: "/leaves/",
+  },
+  payroll: {
+    title: "Payroll Management",
+    description: "Review payroll records and payment status.",
+    endpoint: "/payroll/",
+  },
+  shifts: {
+    title: "Shift Management",
+    description: "View configured employee shifts.",
+    endpoint: "/shifts/",
+  },
+  reviews: {
+    title: "Performance Reviews",
+    description: "Review employee performance records.",
+    endpoint: "/performance-reviews/",
+  },
+  notifications: {
+    title: "Notifications",
+    description: "View and manage your notifications.",
+    endpoint: "/notifications/",
+  },
+  tasks: {
+    title: "Workflow Tasks",
+    description: "Track workforce workflow tasks.",
+    endpoint: "/workflow-tasks/",
+  },
+  interventions: {
+    title: "Retention Interventions",
+    description: "Monitor interventions for workforce retention.",
+    endpoint: "/interventions/",
+  },
+  recommendations: {
+    title: "AI Recommendations",
+    description: "Explore workforce retention recommendations.",
+    endpoint: "/recommendations/",
+  },
+  forecasting: {
+    title: "Workforce Forecasting",
+    description: "View workforce forecast data.",
+    endpoint: "/forecasting/overview",
+  },
+  risk: {
+    title: "Risk Monitoring",
+    description: "Monitor workforce risk indicators.",
+    endpoint: "/risk-monitoring/summary",
+  },
+  alerts: {
+    title: "Smart Alerts",
+    description: "Review high-risk workforce alerts.",
+    endpoint: "/smart-alerts/overview",
+  },
+  stability: {
+    title: "Workforce Stability",
+    description: "Review workforce stability and retention priorities.",
+    endpoint: "/workforce-stability/overview",
+  },
+  activity: {
+    title: "Activity Feed",
+    description: "Review recent workforce activity.",
+    endpoint: "/activity/feed",
+  },
+  audit: {
+    title: "Audit Logs",
+    description: "Review recorded system audit events.",
+    endpoint: "/audit-logs/",
+  },
+  datasets: {
+    title: "AI Datasets",
+    description: "View datasets available for model training.",
+    endpoint: "/datasets/",
+  },
+  chat: {
+    title: "Workforce Chat",
+    description: "View workforce messages.",
+    endpoint: "/chat/messages",
+  },
+  documents: {
+    title: "Employee Documents",
+    description: "View uploaded employee documents.",
+    endpoint: "/documents/",
+  },
+  attendanceReports: {
+    title: "Attendance Reports",
+    description: "Review attendance reporting data.",
+    endpoint: "/attendance/reports",
+  },
+  attritionAnalytics: {
+    title: "Attrition Analytics",
+    description: "Explore attrition risk analytics.",
+    endpoint: "/attrition-analytics/overview",
+  },
+  permissions: {
+    title: "My Permissions",
+    description: "View the permissions associated with your account.",
+    endpoint: "/permissions/me",
+  },
+};
+
+function readableLabel(value) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function displayValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+function DataTable({ rows, search }) {
+  const filtered = rows.filter((row) =>
+    JSON.stringify(row).toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (!filtered.length) {
+    return (
+      <div className="hrms-empty">
+        <Search size={24} />
+        <h3>No records found</h3>
+        <p>Try another search or refresh the data.</p>
+      </div>
+    );
+  }
+
+  const columns = [
+    ...new Set(filtered.flatMap((row) => Object.keys(row))),
+  ].slice(0, 9);
+
+  return (
+    <div className="hrms-table-wrap">
+      <table className="hrms-table">
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column}>{readableLabel(column)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((row, index) => (
+            <tr key={row.id ?? row.employee_id ?? index}>
+              {columns.map((column) => (
+                <td key={column}>
+                  {displayValue(row[column]).length > 100
+                    ? `${displayValue(row[column]).slice(0, 100)}…`
+                    : displayValue(row[column])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+
+function LeaveManagementWorkspace() {
+  const [records, setRecords] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [showForm, setShowForm] = useState(false);
+  const [reviewItem, setReviewItem] = useState(null);
+  const [reviewStatus, setReviewStatus] = useState("APPROVED");
+  const [reviewComments, setReviewComments] = useState("");
+  const [form, setForm] = useState({
+    employee_id: "",
+    leave_type: "CASUAL",
+    start_date: "",
+    end_date: "",
+    reason: "",
+  });
+
+  const role = (localStorage.getItem("wf_role") || "").toUpperCase();
+  const canReview = ["ADMIN", "HR", "MANAGER"].includes(role);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const [leaveResponse, employeeResponse] = await Promise.all([
+        api.get("/leaves/"),
+        api.get("/employees/").catch(() => ({ data: [] })),
+      ]);
+
+      setRecords(
+        Array.isArray(leaveResponse.data) ? leaveResponse.data : []
+      );
+
+      const employeeData = employeeResponse.data;
+      setEmployees(
+        Array.isArray(employeeData)
+          ? employeeData
+          : Array.isArray(employeeData?.items)
+            ? employeeData.items
+            : Array.isArray(employeeData?.employees)
+              ? employeeData.employees
+              : []
+      );
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+        "Unable to load leave requests. Please check your session and backend."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const updateForm = (event) => {
+    const { name, value } = event.target;
+    setForm((previous) => ({ ...previous, [name]: value }));
+  };
+
+  const submitRequest = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    setNotice("");
+
+    const payload = {
+      ...form,
+      employee_id: Number(form.employee_id),
+    };
+
+    try {
+      await api.post("/leaves/", payload);
+      setNotice("Leave request submitted successfully.");
+      setForm({
+        employee_id: "",
+        leave_type: "CASUAL",
+        start_date: "",
+        end_date: "",
+        reason: "",
+      });
+      setShowForm(false);
+      await loadData();
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+        "Could not submit the leave request."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancelRequest = async (leaveId) => {
+    if (!window.confirm("Cancel this pending leave request?")) return;
+
+    setError("");
+    setNotice("");
+
+    try {
+      await api.patch(`/leaves/${leaveId}/cancel`);
+      setNotice("Leave request cancelled.");
+      await loadData();
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+        "Could not cancel this request."
+      );
+    }
+  };
+
+  const submitReview = async (event) => {
+    event.preventDefault();
+
+    if (
+      reviewStatus === "REJECTED" &&
+      !reviewComments.trim()
+    ) {
+      setError("A reason is required when rejecting a request.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      await api.patch(`/leaves/${reviewItem.id}/review`, {
+        status: reviewStatus,
+        reviewer_comments: reviewComments.trim() || null,
+      });
+
+      setNotice(
+        `Leave request #${reviewItem.id} ${reviewStatus.toLowerCase()}.`
+      );
+      setReviewItem(null);
+      setReviewComments("");
+      await loadData();
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+        "Could not review this leave request."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const visibleRecords = records.filter((record) => {
+    const matchesStatus =
+      statusFilter === "ALL" || record.status === statusFilter;
+
+    const matchesSearch = JSON.stringify(record)
+      .toLowerCase()
+      .includes(search.toLowerCase());
+
+    return matchesStatus && matchesSearch;
+  });
+
+  const count = (status) =>
+    records.filter((record) => record.status === status).length;
+
+  const inputStyle = {
+    width: "100%",
+    padding: "11px 12px",
+    border: "1px solid #dbe2ea",
+    borderRadius: "9px",
+    background: "#fff",
+    color: "#172033",
+    font: "inherit",
+    boxSizing: "border-box",
+  };
+
+  const buttonStyle = {
+    border: "none",
+    borderRadius: "9px",
+    padding: "10px 14px",
+    cursor: "pointer",
+    fontWeight: 600,
+    font: "inherit",
+  };
+
+  const cardStyle = {
+    background: "#fff",
+    border: "1px solid #e7ebf1",
+    borderRadius: "14px",
+    padding: "20px",
+    marginBottom: "18px",
+  };
+
+  const statusStyle = (status) => {
+    const styles = {
+      PENDING: { background: "#fff3d6", color: "#946200" },
+      APPROVED: { background: "#dcfce7", color: "#166534" },
+      REJECTED: { background: "#fee2e2", color: "#991b1b" },
+      CANCELLED: { background: "#e5e7eb", color: "#374151" },
+    };
+
+    return {
+      display: "inline-block",
+      padding: "5px 9px",
+      borderRadius: "20px",
+      fontSize: "12px",
+      fontWeight: 700,
+      ...(styles[status] || styles.CANCELLED),
+    };
+  };
+
+  return (
+    <section className="hrms-workspace">
+      <div className="hrms-module-heading">
+        <div>
+          <span className="hrms-eyebrow">WORKFORCE AI PRO</span>
+          <h2>Leave Management</h2>
+          <p>Submit requests and manage employee leave approvals.</p>
+        </div>
+
+        <button
+          type="button"
+          className="secondary-btn"
+          onClick={loadData}
+          disabled={loading}
+        >
+          <RefreshCw size={16} />
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="alert error hrms-alert">
+          <AlertCircle size={17} />
+          <span>{String(error)}</span>
+        </div>
+      )}
+
+      {notice && (
+        <div className="alert success">
+          <CheckCircle2 size={17} />
+          <span>{notice}</span>
+        </div>
+      )}
+
+      <div className="hrms-module-stats">
+        {[
+          ["Total Requests", records.length],
+          ["Pending", count("PENDING")],
+          ["Approved", count("APPROVED")],
+          ["Rejected", count("REJECTED")],
+        ].map(([label, value]) => (
+          <article key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </article>
+        ))}
+      </div>
+
+      <div style={cardStyle}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "12px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <h3 style={{ margin: "0 0 6px" }}>Leave requests</h3>
+            <p style={{ margin: 0, color: "#64748b" }}>
+              Review dates, request reasons, and current status.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            style={{
+              ...buttonStyle,
+              background: "#2563eb",
+              color: "#fff",
+            }}
+            onClick={() => {
+              setShowForm((previous) => !previous);
+              setError("");
+            }}
+          >
+            {showForm ? "Close form" : "+ New leave request"}
+          </button>
+        </div>
+
+        {showForm && (
+          <form
+            onSubmit={submitRequest}
+            style={{
+              marginTop: "22px",
+              paddingTop: "20px",
+              borderTop: "1px solid #e7ebf1",
+            }}
+          >
+            <h3>Submit a leave request</h3>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gap: "16px",
+              }}
+            >
+              <label>
+                Employee
+                <select
+                  name="employee_id"
+                  value={form.employee_id}
+                  onChange={updateForm}
+                  required
+                  style={inputStyle}
+                >
+                  <option value="">Select employee</option>
+                  {employees.map((employee) => (
+                    <option
+                      key={employee.id}
+                      value={employee.id}
+                      disabled={employee.employment_status &&
+                        employee.employment_status !== "ACTIVE"}
+                    >
+                      {employee.full_name ||
+                        employee.name ||
+                        employee.email ||
+                        `Employee #${employee.id}`}
+                      {" "} (ID: {employee.id})
+                    </option>
+                  ))}
+                </select>
+                {employees.length === 0 && (
+                  <small>
+                    No employee list available. Check your employee access.
+                  </small>
+                )}
+              </label>
+
+              <label>
+                Leave type
+                <select
+                  name="leave_type"
+                  value={form.leave_type}
+                  onChange={updateForm}
+                  style={inputStyle}
+                >
+                  {[
+                    "CASUAL",
+                    "SICK",
+                    "ANNUAL",
+                    "UNPAID",
+                    "MATERNITY",
+                    "PATERNITY",
+                    "OTHER",
+                  ].map((type) => (
+                    <option key={type} value={type}>
+                      {readableLabel(type)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Start date
+                <input
+                  type="date"
+                  name="start_date"
+                  value={form.start_date}
+                  onChange={updateForm}
+                  min={new Date().toLocaleDateString("en-CA")}
+                  required
+                  style={inputStyle}
+                />
+              </label>
+
+              <label>
+                End date
+                <input
+                  type="date"
+                  name="end_date"
+                  value={form.end_date}
+                  onChange={updateForm}
+                  min={form.start_date ||
+                    new Date().toLocaleDateString("en-CA")}
+                  required
+                  style={inputStyle}
+                />
+              </label>
+
+              <label style={{ gridColumn: "1 / -1" }}>
+                Reason
+                <textarea
+                  name="reason"
+                  value={form.reason}
+                  onChange={updateForm}
+                  minLength={3}
+                  maxLength={2000}
+                  required
+                  rows={3}
+                  placeholder="Explain the reason for your leave..."
+                  style={inputStyle}
+                />
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              disabled={saving || employees.length === 0}
+              style={{
+                ...buttonStyle,
+                background: "#2563eb",
+                color: "#fff",
+                marginTop: "16px",
+                opacity: saving || employees.length === 0 ? 0.6 : 1,
+              }}
+            >
+              {saving ? "Submitting..." : "Submit request"}
+            </button>
+          </form>
+        )}
+      </div>
+
+      {reviewItem && (
+        <form onSubmit={submitReview} style={cardStyle}>
+          <h3>
+            Review request #{reviewItem.id}
+          </h3>
+
+          <p>
+            Employee #{reviewItem.employee_id} ·{" "}
+            {reviewItem.leave_type} ·{" "}
+            {reviewItem.start_date} to {reviewItem.end_date}
+          </p>
+
+          <label>
+            Decision
+            <select
+              value={reviewStatus}
+              onChange={(event) => setReviewStatus(event.target.value)}
+              style={inputStyle}
+            >
+              <option value="APPROVED">Approve</option>
+              <option value="REJECTED">Reject</option>
+            </select>
+          </label>
+
+          <label style={{ display: "block", marginTop: "14px" }}>
+            Reviewer comments
+            <textarea
+              value={reviewComments}
+              onChange={(event) => setReviewComments(event.target.value)}
+              required={reviewStatus === "REJECTED"}
+              maxLength={2000}
+              rows={3}
+              placeholder={
+                reviewStatus === "REJECTED"
+                  ? "Explain why this request is rejected..."
+                  : "Optional comments..."
+              }
+              style={inputStyle}
+            />
+          </label>
+
+          <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                ...buttonStyle,
+                background: "#2563eb",
+                color: "#fff",
+              }}
+            >
+              {saving ? "Saving..." : "Save decision"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setReviewItem(null)}
+              style={{ ...buttonStyle, background: "#e5e7eb" }}
+            >
+              Close
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div style={cardStyle}>
+        <div
+          style={{
+            display: "flex",
+            gap: "12px",
+            flexWrap: "wrap",
+            marginBottom: "18px",
+          }}
+        >
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search leave requests..."
+            aria-label="Search leave requests"
+            style={{ ...inputStyle, flex: "1 1 220px" }}
+          />
+
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            aria-label="Filter leave status"
+            style={{ ...inputStyle, maxWidth: "200px" }}
+          >
+            <option value="ALL">All statuses</option>
+            <option value="PENDING">Pending</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+        </div>
+
+        {loading && records.length === 0 ? (
+          <div className="hrms-empty">Loading leave requests...</div>
+        ) : visibleRecords.length === 0 ? (
+          <div className="hrms-empty">
+            <Search size={24} />
+            <h3>No leave requests found</h3>
+            <p>Try changing the search or status filter.</p>
+          </div>
+        ) : (
+          <div className="hrms-table-wrap">
+            <table className="hrms-table">
+              <thead>
+                <tr>
+                  <th>Request</th>
+                  <th>Employee</th>
+                  <th>Leave type</th>
+                  <th>Dates</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                  <th>Review comments</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRecords.map((record) => (
+                  <tr key={record.id}>
+                    <td>#{record.id}</td>
+                    <td>
+                      {employees.find(
+                        (employee) => employee.id === record.employee_id
+                      )?.full_name ||
+                        employees.find(
+                          (employee) => employee.id === record.employee_id
+                        )?.name ||
+                        `Employee #${record.employee_id}`}
+                    </td>
+                    <td>{readableLabel(record.leave_type || "")}</td>
+                    <td>
+                      {record.start_date}
+                      <br />
+                      to {record.end_date}
+                    </td>
+                    <td>{record.reason || "—"}</td>
+                    <td>
+                      <span style={statusStyle(record.status)}>
+                        {record.status}
+                      </span>
+                    </td>
+                    <td>{record.reviewer_comments || "—"}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                        {canReview && record.status === "PENDING" && (
+                          <button
+                            type="button"
+                            style={{
+                              ...buttonStyle,
+                              background: "#dbeafe",
+                              color: "#1d4ed8",
+                              padding: "7px 10px",
+                            }}
+                            onClick={() => {
+                              setReviewItem(record);
+                              setReviewStatus("APPROVED");
+                              setReviewComments("");
+                              setError("");
+                            }}
+                          >
+                            Review
+                          </button>
+                        )}
+
+                        {record.status === "PENDING" && (
+                          <button
+                            type="button"
+                            style={{
+                              ...buttonStyle,
+                              background: "#fee2e2",
+                              color: "#991b1b",
+                              padding: "7px 10px",
+                            }}
+                            onClick={() => cancelRequest(record.id)}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
+function PayrollManagementWorkspace() {
+  useEffect(() => {
+    const styleId = "workforce-payroll-workspace-styles";
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = payrollStyles;
+      document.head.appendChild(style);
+    }
+  }, []);
+
+  const [tab, setTab] = useState("records");
+  const [salaries, setSalaries] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [search, setSearch] = useState("");
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [status, setStatus] = useState("");
+  const [salaryForm, setSalaryForm] = useState({
+    employee_id: "",
+    basic_salary: "",
+    allowances: "0",
+    deductions: "0",
+  });
+  const [editingId, setEditingId] = useState(null);
+  const [recordFilters, setRecordFilters] = useState({
+    employee_id: "",
+    month: String(new Date().getMonth() + 1),
+    year: String(new Date().getFullYear()),
+    status: "",
+  });
+
+  const role = (localStorage.getItem("wf_role") || "").toUpperCase();
+  const canManage = ["ADMIN", "HR"].includes(role);
+
+  const money = (value) =>
+    new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 2,
+    }).format(Number(value || 0));
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [salaryResponse, payrollResponse] = await Promise.all([
+        api.get("/payroll/salaries"),
+        api.get("/payroll/"),
+      ]);
+      setSalaries(Array.isArray(salaryResponse.data) ? salaryResponse.data : []);
+      setRecords(Array.isArray(payrollResponse.data) ? payrollResponse.data : []);
+      try {
+        const employeeResponse = await api.get("/employees/");
+        setEmployees(Array.isArray(employeeResponse.data) ? employeeResponse.data : []);
+      } catch {
+        setEmployees([]);
+      }
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+        "Unable to load payroll data. Check your access permissions and backend."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+
+  const submitSalary = async (event) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+
+    try {
+      const payload = {
+        employee_id: Number(salaryForm.employee_id),
+        basic_salary: Number(salaryForm.basic_salary),
+        allowances: Number(salaryForm.allowances || 0),
+        deductions: Number(salaryForm.deductions || 0),
+      };
+
+      if (editingId) {
+        await api.patch(`/payroll/salaries/${editingId}`, {
+          basic_salary: payload.basic_salary,
+          allowances: payload.allowances,
+          deductions: payload.deductions,
+        });
+        setMessage("Salary structure updated successfully.");
+      } else {
+        await api.post("/payroll/salaries", payload);
+        setMessage("Salary structure created successfully.");
+      }
+
+      setSalaryForm({
+        employee_id: "",
+        basic_salary: "",
+        allowances: "0",
+        deductions: "0",
+      });
+      setEditingId(null);
+      await loadAll();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Unable to save the salary structure.");
+    }
+  };
+
+  const editSalary = (salary) => {
+    setEditingId(salary.id);
+    setSalaryForm({
+      employee_id: String(salary.employee_id),
+      basic_salary: String(salary.basic_salary),
+      allowances: String(salary.allowances ?? 0),
+      deductions: String(salary.deductions ?? 0),
+    });
+    setTab("salaries");
+    setError("");
+    setMessage("");
+  };
+
+  const deactivateSalary = async (salary) => {
+    if (!window.confirm("Deactivate this salary structure?")) return;
+
+    try {
+      await api.patch(`/payroll/salaries/${salary.id}`, { is_active: false });
+      setMessage("Salary structure deactivated.");
+      await loadAll();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Unable to deactivate salary structure.");
+    }
+  };
+
+  const generatePayroll = async (event) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await api.post(
+        `/payroll/generate?month=${Number(month)}&year=${Number(year)}`
+      );
+      setMessage(
+        typeof response.data === "string"
+          ? response.data
+          : response.data?.message || "Monthly payroll generation completed."
+      );
+      await loadAll();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Unable to generate monthly payroll.");
+    }
+  };
+
+  const updateRecordStatus = async (record, action) => {
+    const labels = {
+      approve: "approve this payroll record",
+      "mark-paid": "mark this payroll record as paid",
+    };
+    if (!window.confirm(`Are you sure you want to ${labels[action]}?`)) return;
+
+    setError("");
+    setMessage("");
+    try {
+      await api.patch(`/payroll/${record.id}/${action}`);
+      setMessage(
+        action === "approve"
+          ? "Payroll record approved."
+          : "Payroll record marked as paid."
+      );
+      await loadAll();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Unable to update payroll status.");
+    }
+  };
+
+  const filteredSalaries = salaries.filter((salary) => {
+    const employee = employees.find((item) => item.id === salary.employee_id);
+    const text = [
+      salary.id,
+      salary.employee_id,
+      employee?.name,
+      employee?.full_name,
+      employee?.email,
+    ].join(" ").toLowerCase();
+    return text.includes(search.toLowerCase());
+  });
+
+  const filteredRecords = records.filter((record) => {
+    const employee = employees.find((item) => item.id === record.employee_id);
+    const text = [
+      record.id,
+      record.employee_id,
+      employee?.name,
+      employee?.full_name,
+      employee?.email,
+    ].join(" ").toLowerCase();
+
+    return (
+      text.includes(search.toLowerCase()) &&
+      (!recordFilters.employee_id ||
+        String(record.employee_id) === recordFilters.employee_id) &&
+      (!recordFilters.month || Number(record.month) === Number(recordFilters.month)) &&
+      (!recordFilters.year || Number(record.year) === Number(recordFilters.year)) &&
+      (!recordFilters.status || record.status === recordFilters.status)
+    );
+  });
+
+  const employeeName = (employeeId) => {
+    const employee = employees.find((item) => item.id === employeeId);
+    return employee?.name || employee?.full_name || employee?.email ||
+      `Employee #${employeeId}`;
+  };
+
+  const resetSalaryForm = () => {
+    setEditingId(null);
+    setSalaryForm({
+      employee_id: "",
+      basic_salary: "",
+      allowances: "0",
+      deductions: "0",
+    });
+    setError("");
+    setMessage("");
+  };
+
+  const statusClass = (value) =>
+    `payroll-status payroll-status-${String(value || "").toLowerCase()}`;
+
+  return (
+    <section className="hrms-workspace">
+      <div className="hrms-module-heading">
+        <div>
+          <span className="hrms-eyebrow">WORKFORCE AI PRO</span>
+          <h2>Payroll Management</h2>
+          <p>Manage salary structures, monthly payroll, approvals, and payment status.</p>
+        </div>
+        <button
+          className="secondary-btn"
+          type="button"
+          onClick={loadAll}
+          disabled={loading}
+        >
+          {loading ? "Refreshing..." : "Refresh"}
+        </button>
+      </div>
+
+      <div className="hrms-module-stats">
+        <article>
+          <span>Salary structures</span>
+          <strong>{salaries.length}</strong>
+        </article>
+        <article>
+          <span>Payroll records</span>
+          <strong>{records.length}</strong>
+        </article>
+        <article>
+          <span>Pending approval</span>
+          <strong>{records.filter((item) => item.status === "PENDING").length}</strong>
+        </article>
+        <article>
+          <span>Paid records</span>
+          <strong>{records.filter((item) => item.status === "PAID").length}</strong>
+        </article>
+      </div>
+
+      {error && <div className="alert error" role="alert">{String(error)}</div>}
+      {message && <div className="alert success" role="status">{String(message)}</div>}
+
+      <div className="payroll-tabs">
+        <button
+          type="button"
+          className={tab === "records" ? "payroll-tab active" : "payroll-tab"}
+          onClick={() => setTab("records")}
+        >
+          Payroll Records
+        </button>
+        {canManage && (
+          <button
+            type="button"
+            className={tab === "salaries" ? "payroll-tab active" : "payroll-tab"}
+            onClick={() => setTab("salaries")}
+          >
+            Salary Structures
+          </button>
+        )}
+      </div>
+
+      {tab === "records" && (
+        <>
+          {canManage && (
+            <form className="payroll-generate" onSubmit={generatePayroll}>
+              <div>
+                <h3>Generate Monthly Payroll</h3>
+                <p>Create payroll records from active employee salary structures.</p>
+              </div>
+              <label>
+                Month
+                <select value={month} onChange={(event) => setMonth(event.target.value)}>
+                  {Array.from({ length: 12 }, (_, index) => (
+                    <option key={index + 1} value={index + 1}>
+                      {new Date(2000, index, 1).toLocaleString("en", { month: "long" })}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Year
+                <input
+                  type="number"
+                  min="2000"
+                  max="2100"
+                  value={year}
+                  onChange={(event) => setYear(event.target.value)}
+                  required
+                />
+              </label>
+              <button className="primary-btn" type="submit" disabled={loading}>
+                Generate Payroll
+              </button>
+            </form>
+          )}
+
+          <div className="payroll-filters">
+            <label className="payroll-search">
+              Search
+              <input
+                type="search"
+                placeholder="Search employee or record..."
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </label>
+            <label>
+              Employee
+              <select
+                value={recordFilters.employee_id}
+                onChange={(event) =>
+                  setRecordFilters({ ...recordFilters, employee_id: event.target.value })
+                }
+              >
+                <option value="">All employees</option>
+                {employees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {employee.name || employee.full_name || employee.email ||
+                      `Employee #${employee.id}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Month
+              <select
+                value={recordFilters.month}
+                onChange={(event) =>
+                  setRecordFilters({ ...recordFilters, month: event.target.value })
+                }
+              >
+                <option value="">All months</option>
+                {Array.from({ length: 12 }, (_, index) => (
+                  <option key={index + 1} value={index + 1}>
+                    {new Date(2000, index, 1).toLocaleString("en", { month: "short" })}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Year
+              <input
+                type="number"
+                placeholder="All years"
+                value={recordFilters.year}
+                onChange={(event) =>
+                  setRecordFilters({ ...recordFilters, year: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              Status
+              <select
+                value={recordFilters.status}
+                onChange={(event) =>
+                  setRecordFilters({ ...recordFilters, status: event.target.value })
+                }
+              >
+                <option value="">All statuses</option>
+                <option value="PENDING">Pending</option>
+                <option value="APPROVED">Approved</option>
+                <option value="PAID">Paid</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="payroll-table-card">
+            <div className="payroll-table-heading">
+              <h3>Payroll Records</h3>
+              <span>{filteredRecords.length} records</span>
+            </div>
+            {loading ? (
+              <div className="payroll-empty">Loading payroll records...</div>
+            ) : filteredRecords.length === 0 ? (
+              <div className="payroll-empty">No payroll records match your filters.</div>
+            ) : (
+              <div className="payroll-table-wrap">
+                <table className="payroll-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Period</th>
+                      <th>Basic</th>
+                      <th>Allowances</th>
+                      <th>Deductions</th>
+                      <th>Gross</th>
+                      <th>Net Salary</th>
+                      <th>Status</th>
+                      {canManage && <th>Actions</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRecords.map((record) => (
+                      <tr key={record.id}>
+                        <td>
+                          <strong>{employeeName(record.employee_id)}</strong>
+                          <small>Employee #{record.employee_id}</small>
+                        </td>
+                        <td>{String(record.month).padStart(2, "0")}/{record.year}</td>
+                        <td>{money(record.basic_salary)}</td>
+                        <td>{money(record.allowances)}</td>
+                        <td>{money(record.deductions)}</td>
+                        <td>{money(record.gross_salary)}</td>
+                        <td><strong>{money(record.net_salary)}</strong></td>
+                        <td>
+                          <span className={statusClass(record.status)}>{record.status}</span>
+                        </td>
+                        {canManage && (
+                          <td>
+                            <div className="payroll-actions">
+                              {record.status === "PENDING" && (
+                                <button
+                                  className="payroll-action approve"
+                                  type="button"
+                                  onClick={() => updateRecordStatus(record, "approve")}
+                                >
+                                  Approve
+                                </button>
+                              )}
+                              {record.status === "APPROVED" && (
+                                <button
+                                  className="payroll-action paid"
+                                  type="button"
+                                  onClick={() => updateRecordStatus(record, "mark-paid")}
+                                >
+                                  Mark Paid
+                                </button>
+                              )}
+                              {record.status === "PAID" && <span>Completed</span>}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === "salaries" && canManage && (
+        <>
+          <form className="payroll-salary-form" onSubmit={submitSalary}>
+            <div className="payroll-table-heading">
+              <div>
+                <h3>{editingId ? "Edit Salary Structure" : "Create Salary Structure"}</h3>
+                <p>Set the employee's basic pay, allowances, and deductions.</p>
+              </div>
+              {editingId && (
+                <button className="secondary-btn" type="button" onClick={resetSalaryForm}>
+                  Cancel Edit
+                </button>
+              )}
+            </div>
+            <div className="payroll-form-grid">
+              <label>
+                Employee
+                <select
+                  value={salaryForm.employee_id}
+                  onChange={(event) =>
+                    setSalaryForm({ ...salaryForm, employee_id: event.target.value })
+                  }
+                  required
+                  disabled={Boolean(editingId)}
+                >
+                  <option value="">Select employee</option>
+                  {employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.name || employee.full_name || employee.email ||
+                        `Employee #${employee.id}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Basic Salary (₹)
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={salaryForm.basic_salary}
+                  onChange={(event) =>
+                    setSalaryForm({ ...salaryForm, basic_salary: event.target.value })
+                  }
+                  required
+                />
+              </label>
+              <label>
+                Allowances (₹)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={salaryForm.allowances}
+                  onChange={(event) =>
+                    setSalaryForm({ ...salaryForm, allowances: event.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Deductions (₹)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={salaryForm.deductions}
+                  onChange={(event) =>
+                    setSalaryForm({ ...salaryForm, deductions: event.target.value })
+                  }
+                />
+              </label>
+            </div>
+            <div className="payroll-salary-summary">
+              <span>Gross: <strong>{money(Number(salaryForm.basic_salary || 0) + Number(salaryForm.allowances || 0))}</strong></span>
+              <span>Estimated net: <strong>{money(Number(salaryForm.basic_salary || 0) + Number(salaryForm.allowances || 0) - Number(salaryForm.deductions || 0))}</strong></span>
+            </div>
+            <button className="primary-btn" type="submit">
+              {editingId ? "Save Changes" : "Create Salary Structure"}
+            </button>
+          </form>
+
+          <div className="payroll-table-card">
+            <div className="payroll-table-heading">
+              <h3>Employee Salary Structures</h3>
+              <span>{filteredSalaries.length} structures</span>
+            </div>
+            <div className="payroll-filters">
+              <label className="payroll-search">
+                Search
+                <input
+                  type="search"
+                  placeholder="Search employee..."
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </label>
+            </div>
+            {filteredSalaries.length === 0 ? (
+              <div className="payroll-empty">No salary structures found.</div>
+            ) : (
+              <div className="payroll-table-wrap">
+                <table className="payroll-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Basic Salary</th>
+                      <th>Allowances</th>
+                      <th>Deductions</th>
+                      <th>Estimated Net</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSalaries.map((salary) => (
+                      <tr key={salary.id}>
+                        <td>
+                          <strong>{employeeName(salary.employee_id)}</strong>
+                          <small>Employee #{salary.employee_id}</small>
+                        </td>
+                        <td>{money(salary.basic_salary)}</td>
+                        <td>{money(salary.allowances)}</td>
+                        <td>{money(salary.deductions)}</td>
+                        <td>
+                          <strong>
+                            {money(
+                              Number(salary.basic_salary) +
+                              Number(salary.allowances) -
+                              Number(salary.deductions)
+                            )}
+                          </strong>
+                        </td>
+                        <td>
+                          <span className={statusClass(String(salary.is_active))}>
+                            {String(salary.is_active).toLowerCase() === "true" ||
+                            String(salary.is_active).toLowerCase() === "active"
+                              ? "ACTIVE"
+                              : "INACTIVE"}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="payroll-actions">
+                            <button
+                              className="payroll-action"
+                              type="button"
+                              onClick={() => editSalary(salary)}
+                            >
+                              Edit
+                            </button>
+                            {String(salary.is_active).toLowerCase() !== "false" &&
+                              String(salary.is_active).toLowerCase() !== "inactive" && (
+                                <button
+                                  className="payroll-action danger"
+                                  type="button"
+                                  onClick={() => deactivateSalary(salary)}
+                                >
+                                  Deactivate
+                                </button>
+                              )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+
+const payrollStyles = `
+.payroll-tabs{display:flex;gap:8px;margin:22px 0 18px;border-bottom:1px solid var(--border,#e5e7eb)}
+.payroll-tab{border:0;background:transparent;padding:12px 16px;color:var(--muted,#667085);font-weight:600;cursor:pointer;border-bottom:2px solid transparent}
+.payroll-tab.active{color:var(--primary,#3157d5);border-bottom-color:var(--primary,#3157d5)}
+.payroll-generate,.payroll-salary-form,.payroll-table-card{background:var(--card,#fff);border:1px solid var(--border,#e5e7eb);border-radius:14px;padding:20px;margin:18px 0}
+.payroll-generate{display:flex;align-items:end;gap:14px;flex-wrap:wrap}
+.payroll-generate>div{flex:1;min-width:220px}
+.payroll-generate h3,.payroll-table-heading h3{margin:0 0 6px;font-size:16px}
+.payroll-generate p,.payroll-table-heading p{margin:0;color:var(--muted,#667085);font-size:13px}
+.payroll-generate label,.payroll-filters label,.payroll-form-grid label{display:flex;flex-direction:column;gap:7px;font-size:12px;font-weight:600;color:var(--muted,#667085);min-width:125px}
+.payroll-generate input,.payroll-generate select,.payroll-filters input,.payroll-filters select,.payroll-form-grid input,.payroll-form-grid select{width:100%;min-height:40px;padding:9px 11px;border:1px solid var(--border,#d0d5dd);border-radius:8px;background:var(--input-bg,#fff);color:var(--text,#101828);font:inherit}
+.payroll-filters{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin:18px 0}
+.payroll-filters label{flex:1}
+.payroll-filters .payroll-search{flex:2;min-width:210px}
+.payroll-table-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:16px}
+.payroll-table-heading>span{font-size:12px;color:var(--muted,#667085)}
+.payroll-table-wrap{overflow-x:auto}
+.payroll-table{width:100%;border-collapse:collapse;white-space:nowrap}
+.payroll-table th,.payroll-table td{text-align:left;padding:13px 12px;border-bottom:1px solid var(--border,#eaecf0);font-size:12px}
+.payroll-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#667085);background:var(--table-head,#f9fafb)}
+.payroll-table td strong{font-size:12px}
+.payroll-table td small{display:block;margin-top:4px;color:var(--muted,#667085);font-size:11px}
+.payroll-status{display:inline-flex;padding:5px 9px;border-radius:20px;font-size:10px;font-weight:700;background:#f2f4f7;color:#475467}
+.payroll-status-pending{background:#fff4d6;color:#975a00}
+.payroll-status-approved,.payroll-status-active,.payroll-status-true{background:#dcfae6;color:#067647}
+.payroll-status-paid{background:#dbeafe;color:#1d4ed8}
+.payroll-status-rejected,.payroll-status-inactive,.payroll-status-false{background:#fee4e2;color:#b42318}
+.payroll-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.payroll-action{border:1px solid var(--border,#d0d5dd);border-radius:7px;background:var(--card,#fff);padding:7px 9px;font-size:11px;font-weight:600;cursor:pointer;color:var(--text,#344054)}
+.payroll-action.approve,.payroll-action.paid{background:#ecfdf3;border-color:#abefc6;color:#067647}
+.payroll-action.danger{color:#b42318}
+.payroll-form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:20px 0}
+.payroll-salary-summary{display:flex;gap:24px;flex-wrap:wrap;margin:10px 0 18px;font-size:13px;color:var(--muted,#667085)}
+.payroll-salary-summary strong{color:var(--text,#101828)}
+.payroll-empty{padding:32px 16px;text-align:center;color:var(--muted,#667085);font-size:13px}
+@media(max-width:800px){.payroll-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.payroll-generate{align-items:stretch}.payroll-generate label{flex:1}}
+@media(max-width:480px){.payroll-form-grid{grid-template-columns:1fr}.payroll-generate,.payroll-salary-form,.payroll-table-card{padding:14px}}
+`;
+
+
+const shiftWorkspaceStyles = `
+.shift-form-card,.shift-list-card{background:var(--card,#fff);border:1px solid var(--border,#e5e7eb);border-radius:14px;padding:20px;margin:18px 0}
+.shift-card-heading{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:18px}
+.shift-card-heading h3{font-size:16px;margin:0 0 6px}
+.shift-card-heading p{font-size:13px;color:var(--muted,#667085);margin:0}
+.shift-form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.shift-form-grid label{display:flex;flex-direction:column;gap:7px;font-size:12px;font-weight:600;color:var(--muted,#667085)}
+.shift-form-grid input,.shift-form-grid select,.shift-search-row input{width:100%;min-height:41px;padding:9px 11px;border:1px solid var(--border,#d0d5dd);border-radius:8px;background:var(--input-bg,#fff);color:var(--text,#101828);font:inherit}
+.shift-form-footer{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:20px;font-size:13px;color:var(--muted,#667085)}
+.shift-form-footer strong{color:var(--text,#101828)}
+.shift-inactive-toggle{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted,#667085);white-space:nowrap}
+.shift-inactive-toggle input{width:15px;height:15px}
+.shift-search-row{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.shift-search-row input{flex:1}
+.shift-search-row span{font-size:12px;color:var(--muted,#667085);white-space:nowrap}
+.shift-table-wrap{overflow-x:auto}
+.shift-table{width:100%;border-collapse:collapse;white-space:nowrap}
+.shift-table th,.shift-table td{text-align:left;padding:13px 12px;border-bottom:1px solid var(--border,#eaecf0);font-size:12px}
+.shift-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#667085);background:var(--table-head,#f9fafb)}
+.shift-name-cell{display:flex;align-items:center;gap:10px}
+.shift-name-cell strong{display:block;font-size:12px}
+.shift-name-cell small{display:block;margin-top:4px;color:var(--muted,#667085);font-size:11px}
+.shift-icon{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:#eef2ff;color:#4338ca;font-size:10px;font-weight:800}
+.shift-status{display:inline-flex;padding:5px 9px;border-radius:20px;font-size:10px;font-weight:700}
+.shift-active{background:#dcfae6;color:#067647}
+.shift-inactive{background:#fee4e2;color:#b42318}
+.shift-actions{display:flex;align-items:center;gap:7px}
+.shift-action{border:1px solid var(--border,#d0d5dd);border-radius:7px;padding:7px 9px;background:var(--card,#fff);color:var(--text,#344054);font-size:11px;font-weight:600;cursor:pointer}
+.shift-action-danger{color:#b42318}
+.shift-empty{padding:34px 14px;text-align:center;color:var(--muted,#667085);font-size:13px}
+.shift-empty h4{margin:0 0 6px;color:var(--text,#101828)}
+.shift-empty p{margin:0}
+@media(max-width:850px){.shift-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:500px){.shift-form-grid{grid-template-columns:1fr}.shift-form-card,.shift-list-card{padding:14px}.shift-card-heading{align-items:flex-start;flex-direction:column}}
+`;
+
+function ShiftManagementWorkspace() {
+  useEffect(() => {
+    const styleId = "workforce-shift-workspace-styles";
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = shiftWorkspaceStyles;
+      document.head.appendChild(style);
+    }
+  }, []);
+
+  const [shifts, setShifts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [search, setSearch] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+
+  const [form, setForm] = useState({
+    name: "",
+    start_time: "09:00",
+    end_time: "18:00",
+    break_minutes: "60",
+  });
+
+  const role = (localStorage.getItem("wf_role") || "").toUpperCase();
+  const canManage = ["ADMIN", "HR"].includes(role);
+
+  const loadShifts = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await api.get(
+        `/shifts/?active_only=${showInactive ? "false" : "true"}`
+      );
+      setShifts(Array.isArray(response.data) ? response.data : []);
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+        "Unable to load shifts. Check your access permissions and backend."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [showInactive]);
+
+  useEffect(() => {
+    loadShifts();
+  }, [loadShifts]);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setForm({
+      name: "",
+      start_time: "09:00",
+      end_time: "18:00",
+      break_minutes: "60",
+    });
+    setError("");
+    setMessage("");
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+
+    if (form.start_time === form.end_time) {
+      setError("Shift start and end times cannot be identical.");
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const payload = {
+        name: form.name.trim(),
+        start_time: form.start_time,
+        end_time: form.end_time,
+        break_minutes: Number(form.break_minutes),
+      };
+
+      if (editingId !== null) {
+        await api.patch(`/shifts/${editingId}`, payload);
+        setMessage("Shift updated successfully.");
+      } else {
+        await api.post("/shifts/", payload);
+        setMessage("Shift created successfully.");
+      }
+
+      resetForm();
+      setMessage(
+        editingId !== null
+          ? "Shift updated successfully."
+          : "Shift created successfully."
+      );
+      await loadShifts();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Unable to save this shift.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startEditing = (shift) => {
+    setEditingId(shift.id);
+    setForm({
+      name: shift.name,
+      start_time: String(shift.start_time).slice(0, 5),
+      end_time: String(shift.end_time).slice(0, 5),
+      break_minutes: String(shift.break_minutes ?? 60),
+    });
+    setError("");
+    setMessage("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const deactivateShift = async (shift) => {
+    if (!window.confirm(`Deactivate the "${shift.name}" shift?`)) {
+      return;
+    }
+
+    setError("");
+    setMessage("");
+
+    try {
+      await api.patch(`/shifts/${shift.id}/deactivate`);
+      setMessage(`"${shift.name}" was deactivated successfully.`);
+      await loadShifts();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Unable to deactivate this shift.");
+    }
+  };
+
+  const filteredShifts = shifts.filter((shift) =>
+    `${shift.name} ${shift.start_time} ${shift.end_time}`
+      .toLowerCase()
+      .includes(search.toLowerCase())
+  );
+
+  const getDuration = (shift) => {
+    const [startHour, startMinute] = String(shift.start_time).split(":").map(Number);
+    const [endHour, endMinute] = String(shift.end_time).split(":").map(Number);
+
+    let minutes = endHour * 60 + endMinute - (startHour * 60 + startMinute);
+    if (minutes < 0) minutes += 24 * 60;
+
+    minutes = Math.max(0, minutes - Number(shift.break_minutes || 0));
+
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+
+    return remainingMinutes
+      ? `${hours}h ${remainingMinutes}m`
+      : `${hours}h`;
+  };
+
+  return (
+    <section className="hrms-workspace shift-workspace">
+      <div className="hrms-module-heading">
+        <div>
+          <span className="hrms-eyebrow">WORKFORCE AI PRO</span>
+          <h2>Shift Management</h2>
+          <p>Configure working shifts, hours, and break durations.</p>
+        </div>
+
+        <button
+          className="secondary-btn"
+          type="button"
+          onClick={loadShifts}
+          disabled={loading}
+        >
+          {loading ? "Refreshing..." : "Refresh"}
+        </button>
+      </div>
+
+      <div className="hrms-module-stats">
+        <article>
+          <span>Shifts displayed</span>
+          <strong>{shifts.length}</strong>
+        </article>
+        <article>
+          <span>Active shifts</span>
+          <strong>{shifts.filter((shift) => shift.is_active).length}</strong>
+        </article>
+        <article>
+          <span>Inactive shifts</span>
+          <strong>{shifts.filter((shift) => !shift.is_active).length}</strong>
+        </article>
+      </div>
+
+      {error && <div className="alert error" role="alert">{String(error)}</div>}
+      {message && <div className="alert success" role="status">{String(message)}</div>}
+
+      {canManage && (
+        <form className="shift-form-card" onSubmit={handleSubmit}>
+          <div className="shift-card-heading">
+            <div>
+              <h3>{editingId !== null ? "Edit Shift" : "Create New Shift"}</h3>
+              <p>Configure the shift name, working hours, and break duration.</p>
+            </div>
+
+            {editingId !== null && (
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={resetForm}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+
+          <div className="shift-form-grid">
+            <label>
+              Shift Name
+              <input
+                type="text"
+                minLength={2}
+                maxLength={100}
+                placeholder="e.g. Morning Shift"
+                value={form.name}
+                onChange={(event) =>
+                  setForm({ ...form, name: event.target.value })
+                }
+                required
+              />
+            </label>
+
+            <label>
+              Start Time
+              <input
+                type="time"
+                value={form.start_time}
+                onChange={(event) =>
+                  setForm({ ...form, start_time: event.target.value })
+                }
+                required
+              />
+            </label>
+
+            <label>
+              End Time
+              <input
+                type="time"
+                value={form.end_time}
+                onChange={(event) =>
+                  setForm({ ...form, end_time: event.target.value })
+                }
+                required
+              />
+            </label>
+
+            <label>
+              Break Duration
+              <select
+                value={form.break_minutes}
+                onChange={(event) =>
+                  setForm({ ...form, break_minutes: event.target.value })
+                }
+              >
+                <option value="0">No break</option>
+                <option value="15">15 minutes</option>
+                <option value="30">30 minutes</option>
+                <option value="45">45 minutes</option>
+                <option value="60">60 minutes</option>
+                <option value="90">90 minutes</option>
+                <option value="120">120 minutes</option>
+                <option value="180">180 minutes</option>
+                <option value="240">240 minutes</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="shift-form-footer">
+            <span>
+              Net working time:{" "}
+              <strong>
+                {(() => {
+                  const [sh, sm] = form.start_time.split(":").map(Number);
+                  const [eh, em] = form.end_time.split(":").map(Number);
+                  let duration = eh * 60 + em - (sh * 60 + sm);
+                  if (duration < 0) duration += 1440;
+                  duration = Math.max(0, duration - Number(form.break_minutes));
+                  return `${Math.floor(duration / 60)}h ${duration % 60}m`;
+                })()}
+              </strong>
+            </span>
+
+            <button
+              className="primary-btn"
+              type="submit"
+              disabled={saving}
+            >
+              {saving
+                ? "Saving..."
+                : editingId !== null
+                  ? "Save Changes"
+                  : "Create Shift"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="shift-list-card">
+        <div className="shift-card-heading">
+          <div>
+            <h3>Shift Directory</h3>
+            <p>View and manage configured working shifts.</p>
+          </div>
+
+          <label className="shift-inactive-toggle">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(event) => setShowInactive(event.target.checked)}
+            />
+            Include inactive
+          </label>
+        </div>
+
+        <div className="shift-search-row">
+          <input
+            type="search"
+            placeholder="Search by shift name or time..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <span>{filteredShifts.length} shifts</span>
+        </div>
+
+        {loading ? (
+          <div className="shift-empty">Loading shifts...</div>
+        ) : filteredShifts.length === 0 ? (
+          <div className="shift-empty">
+            <h4>No shifts found</h4>
+            <p>Create a shift or change your search filters.</p>
+          </div>
+        ) : (
+          <div className="shift-table-wrap">
+            <table className="shift-table">
+              <thead>
+                <tr>
+                  <th>Shift</th>
+                  <th>Start Time</th>
+                  <th>End Time</th>
+                  <th>Break</th>
+                  <th>Net Hours</th>
+                  <th>Status</th>
+                  {canManage && <th>Actions</th>}
+                </tr>
+              </thead>
+
+              <tbody>
+                {filteredShifts.map((shift) => (
+                  <tr key={shift.id}>
+                    <td>
+                      <div className="shift-name-cell">
+                        <span className="shift-icon">
+                          {shift.start_time < "12:00:00" ? "AM" : "PM"}
+                        </span>
+                        <div>
+                          <strong>{shift.name}</strong>
+                          <small>Shift #{shift.id}</small>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{String(shift.start_time).slice(0, 5)}</td>
+                    <td>{String(shift.end_time).slice(0, 5)}</td>
+                    <td>{shift.break_minutes} min</td>
+                    <td><strong>{getDuration(shift)}</strong></td>
+                    <td>
+                      <span
+                        className={
+                          shift.is_active
+                            ? "shift-status shift-active"
+                            : "shift-status shift-inactive"
+                        }
+                      >
+                        {shift.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    {canManage && (
+                      <td>
+                        <div className="shift-actions">
+                          {shift.is_active && (
+                            <>
+                              <button
+                                type="button"
+                                className="shift-action"
+                                onClick={() => startEditing(shift)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="shift-action shift-action-danger"
+                                onClick={() => deactivateShift(shift)}
+                              >
+                                Deactivate
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
+
+
+
+function PerformanceReviewWorkspace() {
+  const [reviews, setReviews] = useState([]);
+  const [summary, setSummary] = useState({ total_reviews: 0, draft: 0, published: 0, acknowledged: 0, average_published_rating: null });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [editingId, setEditingId] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [form, setForm] = useState({
+    employee_id: "", review_period: "", review_date: new Date().toISOString().slice(0, 10),
+    rating: "3", strengths: "", improvement_areas: "", feedback: "", goals: "",
+  });
+
+  const managerRole = (localStorage.getItem("wf_role") || "").toUpperCase();
+  const canManage = ["ADMIN", "HR", "MANAGER"].includes(managerRole);
+  const panelStyle = { background: "var(--card, #fff)", border: "1px solid var(--border, #e5e7eb)", borderRadius: 14, padding: 18, minWidth: 0 };
+  const fieldStyle = { width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid var(--border, #d1d5db)", borderRadius: 8, background: "var(--input-bg, #fff)", color: "var(--text, #111827)", font: "inherit" };
+  const buttonStyle = { padding: "9px 13px", borderRadius: 8, border: "1px solid var(--border, #d1d5db)", cursor: "pointer", fontWeight: 600, background: "var(--button-bg, #fff)", color: "var(--text, #111827)" };
+  const primaryButtonStyle = { ...buttonStyle, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" };
+
+  const loadData = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const requests = [api.get("/performance-reviews/")];
+      if (canManage) requests.push(api.get("/performance-reviews/summary"));
+      const results = await Promise.all(requests);
+      setReviews(Array.isArray(results[0].data) ? results[0].data : []);
+      if (canManage && results[1]?.data) setSummary(results[1].data);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not load performance reviews. Please check your access and API connection.");
+    } finally { setLoading(false); }
+  }, [canManage]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const resetForm = () => {
+    setForm({ employee_id: "", review_period: "", review_date: new Date().toISOString().slice(0, 10), rating: "3", strengths: "", improvement_areas: "", feedback: "", goals: "" });
+    setEditingId(null); setFormOpen(false);
+  };
+
+  const startEdit = (review) => {
+    setForm({
+      employee_id: String(review.employee_id), review_period: review.review_period || "",
+      review_date: review.review_date || new Date().toISOString().slice(0, 10),
+      rating: String(review.rating || 3), strengths: review.strengths || "",
+      improvement_areas: review.improvement_areas || "", feedback: review.feedback || "", goals: review.goals || "",
+    });
+    setEditingId(review.id); setFormOpen(true); setError(""); setNotice("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault(); setSaving(true); setError(""); setNotice("");
+    try {
+      const payload = {
+        review_period: form.review_period.trim(), review_date: form.review_date, rating: Number(form.rating),
+        strengths: form.strengths.trim() || null, improvement_areas: form.improvement_areas.trim() || null,
+        feedback: form.feedback.trim(), goals: form.goals.trim() || null,
+      };
+      if (editingId) {
+        await api.patch(`/performance-reviews/${editingId}`, payload);
+        setNotice("Draft review updated successfully.");
+      } else {
+        await api.post("/performance-reviews/", { ...payload, employee_id: Number(form.employee_id) });
+        setNotice("Performance review created as a draft.");
+      }
+      resetForm(); await loadData();
+    } catch (err) { setError(err.response?.data?.detail || "Unable to save this review."); }
+    finally { setSaving(false); }
+  };
+
+  const publishReview = async (reviewId) => {
+    if (!window.confirm("Publish this review? The employee will be able to view it.")) return;
+    setError(""); setNotice("");
+    try {
+      await api.post(`/performance-reviews/${reviewId}/publish`);
+      setNotice("Review published successfully."); await loadData();
+    } catch (err) { setError(err.response?.data?.detail || "Unable to publish this review."); }
+  };
+
+  const acknowledgeReview = async (reviewId) => {
+    setError(""); setNotice("");
+    try {
+      await api.post(`/performance-reviews/${reviewId}/acknowledge`);
+      setNotice("Review acknowledged successfully."); await loadData();
+    } catch (err) { setError(err.response?.data?.detail || "Unable to acknowledge this review."); }
+  };
+
+  const visibleReviews = reviews.filter((review) => {
+    const matchesStatus = statusFilter === "ALL" || review.status === statusFilter;
+    const query = search.trim().toLowerCase();
+    const matchesSearch = !query || [review.employee_name, review.reviewer_name, review.review_period, review.status, String(review.employee_id), String(review.id)]
+      .some((value) => String(value || "").toLowerCase().includes(query));
+    return matchesStatus && matchesSearch;
+  });
+  const statusColors = {
+    DRAFT: { color: "#92400e", background: "#fef3c7" },
+    PUBLISHED: { color: "#1d4ed8", background: "#dbeafe" },
+    ACKNOWLEDGED: { color: "#166534", background: "#dcfce7" },
+  };
+  const metricCards = [
+    ["Total reviews", summary.total_reviews ?? reviews.length],
+    ["Drafts", summary.draft ?? reviews.filter((r) => r.status === "DRAFT").length],
+    ["Published", summary.published ?? reviews.filter((r) => r.status === "PUBLISHED").length],
+    ["Acknowledged", summary.acknowledged ?? reviews.filter((r) => r.status === "ACKNOWLEDGED").length],
+  ];
+
+  return (
+    <section style={{ display: "grid", gap: 18, color: "var(--text, #111827)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div><h2 style={{ margin: 0, fontSize: 24 }}>Performance Reviews</h2><p style={{ margin: "6px 0 0", color: "var(--muted, #6b7280)" }}>Create reviews, track ratings, and manage the publish and acknowledgement workflow.</p></div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" style={buttonStyle} onClick={loadData}>Refresh</button>
+          {canManage && <button type="button" style={primaryButtonStyle} onClick={() => {
+            if (formOpen && !editingId) resetForm();
+            else { setEditingId(null); setFormOpen(true); setError(""); setNotice(""); }
+          }}>{formOpen && !editingId ? "Close form" : "Create review"}</button>}
+        </div>
+      </div>
+
+      {error && <div role="alert" style={{ ...panelStyle, color: "#b91c1c", background: "#fef2f2", borderColor: "#fecaca" }}>{String(error)}</div>}
+      {notice && <div role="status" style={{ ...panelStyle, color: "#166534", background: "#f0fdf4", borderColor: "#bbf7d0" }}>{notice}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: 12 }}>
+        {metricCards.map(([label, value]) => <div key={label} style={panelStyle}><div style={{ fontSize: 13, color: "var(--muted, #6b7280)" }}>{label}</div><div style={{ fontSize: 28, fontWeight: 750, marginTop: 8 }}>{value}</div></div>)}
+        <div style={panelStyle}><div style={{ fontSize: 13, color: "var(--muted, #6b7280)" }}>Average published rating</div><div style={{ fontSize: 28, fontWeight: 750, marginTop: 8 }}>{summary.average_published_rating == null ? "—" : `${summary.average_published_rating} / 5`}</div></div>
+      </div>
+
+      {canManage && formOpen && <form onSubmit={handleSubmit} style={{ ...panelStyle, display: "grid", gap: 14 }}>
+        <h3 style={{ margin: 0 }}>{editingId ? `Edit draft review #${editingId}` : "Create performance review"}</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+          {!editingId && <label style={{ display: "grid", gap: 6 }}>Employee ID<input style={fieldStyle} type="number" min="1" required value={form.employee_id} onChange={(e) => setForm({ ...form, employee_id: e.target.value })} placeholder="Enter employee ID" /></label>}
+          <label style={{ display: "grid", gap: 6 }}>Review period<input style={fieldStyle} required minLength={2} maxLength={100} value={form.review_period} onChange={(e) => setForm({ ...form, review_period: e.target.value })} placeholder="e.g. Q3 2026" /></label>
+          <label style={{ display: "grid", gap: 6 }}>Review date<input style={fieldStyle} type="date" required value={form.review_date} onChange={(e) => setForm({ ...form, review_date: e.target.value })} /></label>
+          <label style={{ display: "grid", gap: 6 }}>Rating<select style={fieldStyle} value={form.rating} onChange={(e) => setForm({ ...form, rating: e.target.value })}>{[1,2,3,4,5].map((rating) => <option key={rating} value={rating}>{rating} / 5{rating === 5 ? " — Outstanding" : rating === 4 ? " — Exceeds expectations" : rating === 3 ? " — Meets expectations" : rating === 2 ? " — Needs improvement" : " — Unsatisfactory"}</option>)}</select></label>
+        </div>
+        <label style={{ display: "grid", gap: 6 }}>Strengths<textarea style={fieldStyle} rows={2} value={form.strengths} onChange={(e) => setForm({ ...form, strengths: e.target.value })} placeholder="Key strengths and achievements" /></label>
+        <label style={{ display: "grid", gap: 6 }}>Areas for improvement<textarea style={fieldStyle} rows={2} value={form.improvement_areas} onChange={(e) => setForm({ ...form, improvement_areas: e.target.value })} placeholder="Skills or areas to develop" /></label>
+        <label style={{ display: "grid", gap: 6 }}>Feedback — required<textarea style={fieldStyle} rows={3} required minLength={3} value={form.feedback} onChange={(e) => setForm({ ...form, feedback: e.target.value })} placeholder="Write constructive performance feedback" /></label>
+        <label style={{ display: "grid", gap: 6 }}>Goals<textarea style={fieldStyle} rows={2} value={form.goals} onChange={(e) => setForm({ ...form, goals: e.target.value })} placeholder="Goals for the next review period" /></label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button type="submit" style={primaryButtonStyle} disabled={saving}>{saving ? "Saving..." : editingId ? "Save changes" : "Create draft"}</button><button type="button" style={buttonStyle} onClick={resetForm} disabled={saving}>Cancel</button></div>
+      </form>}
+
+      <div style={{ ...panelStyle, display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <input style={{ ...fieldStyle, flex: "1 1 240px" }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employee, period, reviewer, or review ID..." />
+          <select style={{ ...fieldStyle, maxWidth: 220 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="ALL">All statuses</option><option value="DRAFT">Draft</option><option value="PUBLISHED">Published</option><option value="ACKNOWLEDGED">Acknowledged</option></select>
+        </div>
+        {loading ? <p>Loading performance reviews...</p> : visibleReviews.length === 0 ? <div style={{ textAlign: "center", padding: 30, color: "var(--muted, #6b7280)" }}><h3 style={{ margin: "0 0 6px", color: "var(--text, #111827)" }}>No reviews found</h3><p style={{ margin: 0 }}>Try changing the search or status filter.</p></div> : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {visibleReviews.map((review) => <article key={review.id} style={{ border: "1px solid var(--border, #e5e7eb)", borderRadius: 12, padding: 16, display: "grid", gap: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}><div><h3 style={{ margin: 0 }}>{review.employee_name || `Employee #${review.employee_id}`}</h3><p style={{ margin: "5px 0 0", color: "var(--muted, #6b7280)", fontSize: 13 }}>Review #{review.id} · {review.review_period} · {review.review_date || "No date"}</p></div><span style={{ ...statusColors[review.status], borderRadius: 999, padding: "5px 10px", fontSize: 12, fontWeight: 700 }}>{review.status}</span></div>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 14 }}><span><strong>Rating:</strong> {review.rating} / 5</span><span><strong>Reviewer:</strong> {review.reviewer_name || "—"}</span>{review.employee_acknowledged && <span><strong>Acknowledged:</strong> {review.employee_acknowledged}</span>}</div>
+              {review.strengths && <div><strong>Strengths</strong><p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{review.strengths}</p></div>}
+              {review.improvement_areas && <div><strong>Areas for improvement</strong><p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{review.improvement_areas}</p></div>}
+              <div><strong>Feedback</strong><p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{review.feedback}</p></div>
+              {review.goals && <div><strong>Goals</strong><p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{review.goals}</p></div>}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {canManage && review.status === "DRAFT" && <><button type="button" style={buttonStyle} onClick={() => startEdit(review)}>Edit draft</button><button type="button" style={primaryButtonStyle} onClick={() => publishReview(review.id)}>Publish review</button></>}
+                {!canManage && review.status === "PUBLISHED" && <button type="button" style={primaryButtonStyle} onClick={() => acknowledgeReview(review.id)}>Acknowledge review</button>}
+              </div>
+            </article>)}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
+
+function NotificationsWorkspace() {
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [search, setSearch] = useState("");
+  const [showComposer, setShowComposer] = useState(false);
+  const [recipientId, setRecipientId] = useState("");
+  const [title, setTitle] = useState("");
+  const [message, setMessage] = useState("");
+  const [category, setCategory] = useState("GENERAL");
+  const [sending, setSending] = useState(false);
+
+  const role = (localStorage.getItem("wf_role") || "").toUpperCase();
+  const canSend = ["ADMIN", "HR"].includes(role);
+  const panelStyle = { background: "var(--card, #fff)", border: "1px solid var(--border, #e5e7eb)", borderRadius: 14, padding: 18, minWidth: 0 };
+  const fieldStyle = { width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid var(--border, #d1d5db)", borderRadius: 8, background: "var(--input-bg, #fff)", color: "var(--text, #111827)", font: "inherit" };
+  const buttonStyle = { padding: "9px 13px", borderRadius: 8, border: "1px solid var(--border, #d1d5db)", cursor: "pointer", fontWeight: 600, background: "var(--button-bg, #fff)", color: "var(--text, #111827)" };
+  const primaryStyle = { ...buttonStyle, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" };
+
+  const loadNotifications = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const [listResult, countResult] = await Promise.all([
+        api.get("/notifications/", { params: { limit: 100 } }),
+        api.get("/notifications/unread-count"),
+      ]);
+      setNotifications(Array.isArray(listResult.data) ? listResult.data : []);
+      setUnreadCount(Number(countResult.data?.unread_count || 0));
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not load notifications. Please check your access and API connection.");
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadNotifications(); }, [loadNotifications]);
+
+  const markRead = async (notification, isRead) => {
+    setBusyId(notification.id); setError(""); setNotice("");
+    try {
+      await api.patch(`/notifications/${notification.id}/read`, { is_read: isRead });
+      setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, is_read: isRead, read_at: isRead ? new Date().toISOString() : null } : item));
+      setUnreadCount((count) => Math.max(0, count + (isRead ? -1 : 1)));
+      setNotice(isRead ? "Notification marked as read." : "Notification marked as unread.");
+    } catch (err) { setError(err.response?.data?.detail || "Could not update notification status."); }
+    finally { setBusyId(null); }
+  };
+
+  const markAllRead = async () => {
+    setBusyId("all"); setError(""); setNotice("");
+    try {
+      const result = await api.patch("/notifications/read-all");
+      setNotifications((items) => items.map((item) => ({ ...item, is_read: true, read_at: item.read_at || new Date().toISOString() })));
+      setUnreadCount(0);
+      setNotice(result.data?.message || "All notifications marked as read.");
+    } catch (err) { setError(err.response?.data?.detail || "Could not mark all notifications as read."); }
+    finally { setBusyId(null); }
+  };
+
+  const deleteNotification = async (notificationId) => {
+    if (!window.confirm("Delete this notification?")) return;
+    setBusyId(notificationId); setError(""); setNotice("");
+    try {
+      await api.delete(`/notifications/${notificationId}`);
+      const removed = notifications.find((item) => item.id === notificationId);
+      setNotifications((items) => items.filter((item) => item.id !== notificationId));
+      if (removed && !removed.is_read) setUnreadCount((count) => Math.max(0, count - 1));
+      setNotice("Notification deleted.");
+    } catch (err) { setError(err.response?.data?.detail || "Could not delete notification."); }
+    finally { setBusyId(null); }
+  };
+
+  const sendNotification = async (event) => {
+    event.preventDefault(); setSending(true); setError(""); setNotice("");
+    try {
+      await api.post("/notifications/", { user_id: Number(recipientId), title: title.trim(), message: message.trim(), category: category.trim().toUpperCase() });
+      setNotice("Notification sent successfully.");
+      setRecipientId(""); setTitle(""); setMessage(""); setCategory("GENERAL"); setShowComposer(false);
+    } catch (err) { setError(err.response?.data?.detail || "Could not send notification. Confirm the recipient user ID and try again."); }
+    finally { setSending(false); }
+  };
+
+  const filtered = notifications.filter((item) => {
+    const matchesCategory = categoryFilter === "ALL" || String(item.category || "").toUpperCase() === categoryFilter;
+    const matchesUnread = !unreadOnly || !item.is_read;
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q || [item.title, item.message, item.category, String(item.id)].some((value) => String(value || "").toLowerCase().includes(q));
+    return matchesCategory && matchesUnread && matchesSearch;
+  });
+  const categoryOptions = [...new Set(notifications.map((item) => String(item.category || "GENERAL").toUpperCase()))].sort();
+  const dateText = (value) => {
+    if (!value) return "—";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+  };
+
+  return (
+    <section style={{ display: "grid", gap: 18, color: "var(--text, #111827)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div><h2 style={{ margin: 0, fontSize: 24 }}>Notifications</h2><p style={{ margin: "6px 0 0", color: "var(--muted, #6b7280)" }}>View alerts, manage read status, and keep your notification inbox organized.</p></div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" style={buttonStyle} onClick={loadNotifications}>Refresh</button>
+          {unreadCount > 0 && <button type="button" style={buttonStyle} onClick={markAllRead} disabled={busyId === "all"}>{busyId === "all" ? "Updating..." : "Mark all read"}</button>}
+          {canSend && <button type="button" style={primaryStyle} onClick={() => { setShowComposer((open) => !open); setError(""); setNotice(""); }}>{showComposer ? "Close composer" : "Send notification"}</button>}
+        </div>
+      </div>
+      {error && <div role="alert" style={{ ...panelStyle, color: "#b91c1c", background: "#fef2f2", borderColor: "#fecaca" }}>{String(error)}</div>}
+      {notice && <div role="status" style={{ ...panelStyle, color: "#166534", background: "#f0fdf4", borderColor: "#bbf7d0" }}>{notice}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+        <div style={panelStyle}><div style={{ color: "var(--muted, #6b7280)", fontSize: 13 }}>Total loaded</div><div style={{ fontSize: 28, fontWeight: 750, marginTop: 8 }}>{notifications.length}</div></div>
+        <div style={panelStyle}><div style={{ color: "var(--muted, #6b7280)", fontSize: 13 }}>Unread notifications</div><div style={{ fontSize: 28, fontWeight: 750, marginTop: 8 }}>{unreadCount}</div></div>
+        <div style={panelStyle}><div style={{ color: "var(--muted, #6b7280)", fontSize: 13 }}>Read notifications</div><div style={{ fontSize: 28, fontWeight: 750, marginTop: 8 }}>{notifications.filter((item) => item.is_read).length}</div></div>
+      </div>
+
+      {canSend && showComposer && <form onSubmit={sendNotification} style={{ ...panelStyle, display: "grid", gap: 14 }}>
+        <h3 style={{ margin: 0 }}>Send a notification</h3>
+        <p style={{ margin: 0, color: "var(--muted, #6b7280)", fontSize: 13 }}>Available to Admin and HR. Enter the recipient's active user ID.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+          <label style={{ display: "grid", gap: 6 }}>Recipient user ID<input style={fieldStyle} type="number" min="1" required value={recipientId} onChange={(e) => setRecipientId(e.target.value)} placeholder="e.g. 12" /></label>
+          <label style={{ display: "grid", gap: 6 }}>Category<input style={fieldStyle} required maxLength={50} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="GENERAL, HR, PAYROLL..." /></label>
+        </div>
+        <label style={{ display: "grid", gap: 6 }}>Title<input style={fieldStyle} required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Notification title" /></label>
+        <label style={{ display: "grid", gap: 6 }}>Message<textarea style={fieldStyle} required rows={3} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Write the notification message" /></label>
+        <div><button type="submit" style={primaryStyle} disabled={sending}>{sending ? "Sending..." : "Send notification"}</button></div>
+      </form>}
+
+      <div style={{ ...panelStyle, display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <input style={{ ...fieldStyle, flex: "1 1 240px" }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, message, category, or ID..." />
+          <select style={{ ...fieldStyle, maxWidth: 220 }} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}><option value="ALL">All categories</option>{categoryOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}><input type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} /> Unread only</label>
+        </div>
+        {loading ? <p>Loading notifications...</p> : filtered.length === 0 ? <div style={{ textAlign: "center", padding: 30, color: "var(--muted, #6b7280)" }}><h3 style={{ margin: "0 0 6px", color: "var(--text, #111827)" }}>No notifications found</h3><p style={{ margin: 0 }}>You're all caught up, or no notifications match your filters.</p></div> : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {filtered.map((item) => <article key={item.id} style={{ border: `1px solid ${item.is_read ? "var(--border, #e5e7eb)" : "#93c5fd"}`, borderRadius: 12, padding: 16, display: "grid", gap: 10, background: item.is_read ? "var(--card, #fff)" : "var(--unread-bg, #eff6ff)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}><span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", marginTop: 7, flexShrink: 0, background: item.is_read ? "#9ca3af" : "#2563eb" }} /><div><h3 style={{ margin: 0, fontSize: 16 }}>{item.title}</h3><p style={{ margin: "5px 0 0", fontSize: 13, color: "var(--muted, #6b7280)" }}>#{item.id} · {String(item.category || "GENERAL").toUpperCase()} · {dateText(item.created_at)}</p></div></div>
+                <span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 12, fontWeight: 700, color: item.is_read ? "#4b5563" : "#1d4ed8", background: item.is_read ? "#f3f4f6" : "#dbeafe" }}>{item.is_read ? "READ" : "UNREAD"}</span>
+              </div>
+              <p style={{ margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{item.message}</p>
+              {item.read_at && <div style={{ fontSize: 12, color: "var(--muted, #6b7280)" }}>Read at: {dateText(item.read_at)}</div>}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button type="button" style={buttonStyle} disabled={busyId === item.id} onClick={() => markRead(item, !item.is_read)}>{busyId === item.id ? "Updating..." : item.is_read ? "Mark unread" : "Mark read"}</button><button type="button" style={buttonStyle} disabled={busyId === item.id} onClick={() => deleteNotification(item.id)}>Delete</button></div>
+            </article>)}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
+
+function WorkflowTaskWorkspace() {
+  const [tasks, setTasks] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [priorityFilter, setPriorityFilter] = useState("ALL");
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [assignedTo, setAssignedTo] = useState("");
+  const [priority, setPriority] = useState("MEDIUM");
+  const [dueDate, setDueDate] = useState("");
+  const [status, setStatus] = useState("TODO");
+  const [completionNotes, setCompletionNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const role = (localStorage.getItem("wf_role") || "").toUpperCase();
+  const canManage = ["ADMIN", "HR", "MANAGER"].includes(role);
+  const canDelete = ["ADMIN", "HR"].includes(role);
+  const panelStyle = { background: "var(--card, #fff)", border: "1px solid var(--border, #e5e7eb)", borderRadius: 14, padding: 18, minWidth: 0 };
+  const fieldStyle = { width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid var(--border, #d1d5db)", borderRadius: 8, background: "var(--input-bg, #fff)", color: "var(--text, #111827)", font: "inherit" };
+  const buttonStyle = { padding: "9px 13px", borderRadius: 8, border: "1px solid var(--border, #d1d5db)", cursor: "pointer", fontWeight: 600, background: "var(--button-bg, #fff)", color: "var(--text, #111827)" };
+  const primaryStyle = { ...buttonStyle, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" };
+
+  const loadTasks = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const [taskResult, summaryResult] = await Promise.all([
+        api.get("/workflow-tasks/", { params: { limit: 500 } }),
+        api.get("/workflow-tasks/summary"),
+      ]);
+      setTasks(Array.isArray(taskResult.data) ? taskResult.data : []);
+      setSummary(summaryResult.data || {});
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not load tasks. Please check your access and API connection.");
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadTasks(); }, [loadTasks]);
+
+  const resetForm = () => {
+    setEditingTask(null); setTitle(""); setDescription(""); setAssignedTo("");
+    setPriority("MEDIUM"); setDueDate(""); setStatus("TODO"); setCompletionNotes("");
+  };
+  const startCreate = () => { resetForm(); setShowForm(true); setError(""); setNotice(""); };
+  const startEdit = (task) => {
+    setEditingTask(task); setTitle(task.title || ""); setDescription(task.description || "");
+    setAssignedTo(String(task.assigned_to || "")); setPriority(task.priority || "MEDIUM");
+    setDueDate(task.due_date || ""); setStatus(task.status || "TODO");
+    setCompletionNotes(task.completion_notes || ""); setShowForm(true); setError(""); setNotice("");
+  };
+
+  const saveTask = async (event) => {
+    event.preventDefault(); setSaving(true); setError(""); setNotice("");
+    try {
+      if (editingTask) {
+        const payload = canManage
+          ? { title: title.trim(), description: description.trim() || null, assigned_to: Number(assignedTo), priority, status, due_date: dueDate || null, completion_notes: completionNotes.trim() || null }
+          : { status, completion_notes: completionNotes.trim() || null };
+        await api.patch(`/workflow-tasks/${editingTask.id}`, payload);
+        setNotice("Task updated successfully.");
+      } else {
+        await api.post("/workflow-tasks/", { title: title.trim(), description: description.trim() || null, assigned_to: Number(assignedTo), priority, due_date: dueDate || null });
+        setNotice("Task created successfully.");
+      }
+      setShowForm(false); resetForm(); await loadTasks();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not save task. Please check the entered details.");
+    } finally { setSaving(false); }
+  };
+
+  const deleteTask = async (task) => {
+    if (!window.confirm(`Delete task "${task.title}"? This cannot be undone.`)) return;
+    setBusyId(task.id); setError(""); setNotice("");
+    try {
+      await api.delete(`/workflow-tasks/${task.id}`);
+      setTasks((items) => items.filter((item) => item.id !== task.id));
+      setNotice("Task deleted successfully.");
+      await loadTasks();
+    } catch (err) { setError(err.response?.data?.detail || "Could not delete task."); }
+    finally { setBusyId(null); }
+  };
+
+  const filtered = tasks.filter((task) => {
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q || [task.title, task.description, task.assignee_name, task.creator_name, String(task.id)].some((value) => String(value || "").toLowerCase().includes(q));
+    return matchesSearch && (statusFilter === "ALL" || task.status === statusFilter) && (priorityFilter === "ALL" || task.priority === priorityFilter) && (!overdueOnly || task.is_overdue);
+  });
+  const dateText = (value) => {
+    if (!value) return "No due date";
+    const parsed = new Date(`${value}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString();
+  };
+  const statusColors = { TODO: ["#f3f4f6", "#374151"], IN_PROGRESS: ["#dbeafe", "#1d4ed8"], COMPLETED: ["#dcfce7", "#166534"], CANCELLED: ["#fee2e2", "#991b1b"] };
+  const priorityColors = { LOW: ["#f3f4f6", "#4b5563"], MEDIUM: ["#e0f2fe", "#075985"], HIGH: ["#ffedd5", "#9a3412"], URGENT: ["#fee2e2", "#991b1b"] };
+
+  return (
+    <section style={{ display: "grid", gap: 18, color: "var(--text, #111827)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div><h2 style={{ margin: 0, fontSize: 24 }}>Workflow &amp; Task Management</h2><p style={{ margin: "6px 0 0", color: "var(--muted, #6b7280)" }}>Assign work, track progress, and manage due dates and priorities.</p></div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button type="button" style={buttonStyle} onClick={loadTasks}>Refresh</button>{canManage && <button type="button" style={primaryStyle} onClick={startCreate}>Create task</button>}</div>
+      </div>
+      {error && <div role="alert" style={{ ...panelStyle, color: "#b91c1c", background: "#fef2f2", borderColor: "#fecaca" }}>{String(error)}</div>}
+      {notice && <div role="status" style={{ ...panelStyle, color: "#166534", background: "#f0fdf4", borderColor: "#bbf7d0" }}>{notice}</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: 12 }}>
+        {[["Total tasks", summary.total ?? 0], ["To do", summary.todo ?? 0], ["In progress", summary.in_progress ?? 0], ["Completed", summary.completed ?? 0], ["Overdue", summary.overdue ?? 0], ["High priority", summary.high_priority ?? 0]].map(([label, value]) => <div key={label} style={panelStyle}><div style={{ fontSize: 13, color: "var(--muted, #6b7280)" }}>{label}</div><div style={{ fontSize: 27, fontWeight: 750, marginTop: 8 }}>{value}</div></div>)}
+      </div>
+      {showForm && <form onSubmit={saveTask} style={{ ...panelStyle, display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}><h3 style={{ margin: 0 }}>{editingTask ? `Update task #${editingTask.id}` : "Create a task"}</h3><button type="button" style={buttonStyle} onClick={() => { setShowForm(false); resetForm(); }}>Cancel</button></div>
+        {canManage ? <>
+          <label style={{ display: "grid", gap: 6 }}>Task title<input style={fieldStyle} required minLength={3} maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Enter task title" /></label>
+          <label style={{ display: "grid", gap: 6 }}>Description<textarea style={fieldStyle} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe the task and expected outcome" /></label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+            <label style={{ display: "grid", gap: 6 }}>Assigned user ID<input style={fieldStyle} type="number" min="1" required value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} placeholder="Active user ID" /></label>
+            <label style={{ display: "grid", gap: 6 }}>Priority<select style={fieldStyle} value={priority} onChange={(e) => setPriority(e.target.value)}>{["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => <option key={value}>{value}</option>)}</select></label>
+            <label style={{ display: "grid", gap: 6 }}>Due date<input style={fieldStyle} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></label>
+            {editingTask && <label style={{ display: "grid", gap: 6 }}>Status<select style={fieldStyle} value={status} onChange={(e) => setStatus(e.target.value)}>{["TODO", "IN_PROGRESS", "COMPLETED", "CANCELLED"].map((value) => <option key={value}>{value}</option>)}</select></label>}
+          </div>
+        </> : <div style={{ padding: 12, borderRadius: 8, background: "var(--subtle-bg, #f9fafb)" }}>You can update the status and completion notes for tasks assigned to you.</div>}
+        <label style={{ display: "grid", gap: 6 }}>Completion notes<textarea style={fieldStyle} rows={2} value={completionNotes} onChange={(e) => setCompletionNotes(e.target.value)} placeholder="Add progress or completion notes" /></label>
+        <div><button type="submit" style={primaryStyle} disabled={saving}>{saving ? "Saving..." : editingTask ? "Save changes" : "Create task"}</button></div>
+      </form>}
+      <div style={{ ...panelStyle, display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <input style={{ ...fieldStyle, flex: "1 1 220px" }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search task, assignee, or ID..." />
+          <select style={{ ...fieldStyle, maxWidth: 190 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="ALL">All statuses</option>{["TODO", "IN_PROGRESS", "COMPLETED", "CANCELLED"].map((value) => <option key={value}>{value}</option>)}</select>
+          <select style={{ ...fieldStyle, maxWidth: 170 }} value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}><option value="ALL">All priorities</option>{["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => <option key={value}>{value}</option>)}</select>
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} /> Overdue only</label>
+        </div>
+        {loading ? <p>Loading tasks...</p> : filtered.length === 0 ? <div style={{ textAlign: "center", padding: 28, color: "var(--muted, #6b7280)" }}><h3 style={{ margin: "0 0 6px", color: "var(--text, #111827)" }}>No tasks found</h3><p style={{ margin: 0 }}>Try changing your filters or create a task if you have permission.</p></div> : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {filtered.map((task) => <article key={task.id} style={{ border: `1px solid ${task.is_overdue ? "#fca5a5" : "var(--border, #e5e7eb)"}`, borderRadius: 12, padding: 16, display: "grid", gap: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                <div><h3 style={{ margin: 0, fontSize: 17 }}>{task.title}</h3><p style={{ margin: "5px 0 0", fontSize: 13, color: "var(--muted, #6b7280)" }}>Task #{task.id}{task.assignee_name ? ` · Assigned to ${task.assignee_name}` : ` · User ${task.assigned_to}`}{task.creator_name ? ` · Created by ${task.creator_name}` : ""}</p></div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}><span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 12, fontWeight: 700, background: (statusColors[task.status] || statusColors.TODO)[0], color: (statusColors[task.status] || statusColors.TODO)[1] }}>{String(task.status || "TODO").replace("_", " ")}</span><span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 12, fontWeight: 700, background: (priorityColors[task.priority] || priorityColors.MEDIUM)[0], color: (priorityColors[task.priority] || priorityColors.MEDIUM)[1] }}>{task.priority}</span>{task.is_overdue && <span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 12, fontWeight: 700, background: "#fee2e2", color: "#991b1b" }}>OVERDUE</span>}</div>
+              </div>
+              {task.description && <p style={{ margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{task.description}</p>}
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13, color: task.is_overdue ? "#b91c1c" : "var(--muted, #6b7280)" }}><span>Due: {dateText(task.due_date)}</span>{task.completed_at && <span>Completed: {new Date(task.completed_at).toLocaleString()}</span>}</div>
+              {task.completion_notes && <div style={{ padding: 10, borderRadius: 8, background: "var(--subtle-bg, #f9fafb)" }}><strong style={{ fontSize: 13 }}>Completion notes</strong><p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{task.completion_notes}</p></div>}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button type="button" style={buttonStyle} onClick={() => startEdit(task)}>{canManage ? "Edit task" : "Update progress"}</button>{canDelete && <button type="button" style={buttonStyle} disabled={busyId === task.id} onClick={() => deleteTask(task)}>{busyId === task.id ? "Deleting..." : "Delete task"}</button>}</div>
+            </article>)}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
+function InterventionManagementWorkspace() {
+  const [items, setItems] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [priorityFilter, setPriorityFilter] = useState("ALL");
+  const [showForm, setShowForm] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [employeeId, setEmployeeId] = useState("");
+  const [predictionId, setPredictionId] = useState("");
+  const [assignedTo, setAssignedTo] = useState("");
+  const [interventionType, setInterventionType] = useState("RETENTION");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState("MEDIUM");
+  const [actionPlan, setActionPlan] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [status, setStatus] = useState("OPEN");
+  const [outcomeNotes, setOutcomeNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const role = (localStorage.getItem("wf_role") || "").toUpperCase();
+  const canManage = ["ADMIN", "HR", "MANAGER"].includes(role);
+  const canDelete = ["ADMIN", "HR"].includes(role);
+  const panelStyle = { background: "var(--card, #fff)", border: "1px solid var(--border, #e5e7eb)", borderRadius: 14, padding: 18, minWidth: 0 };
+  const fieldStyle = { width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid var(--border, #d1d5db)", borderRadius: 8, background: "var(--input-bg, #fff)", color: "var(--text, #111827)", font: "inherit" };
+  const buttonStyle = { padding: "9px 13px", borderRadius: 8, border: "1px solid var(--border, #d1d5db)", cursor: "pointer", fontWeight: 600, background: "var(--button-bg, #fff)", color: "var(--text, #111827)" };
+  const primaryStyle = { ...buttonStyle, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" };
+
+  const loadItems = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const [listResult, summaryResult] = await Promise.all([
+        api.get("/interventions/", { params: { limit: 500 } }),
+        api.get("/interventions/summary"),
+      ]);
+      setItems(Array.isArray(listResult.data) ? listResult.data : []);
+      setSummary(summaryResult.data || {});
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not load interventions. Admin, HR, or Manager access is required.");
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadItems(); }, [loadItems]);
+
+  const resetForm = () => {
+    setEditingItem(null); setEmployeeId(""); setPredictionId(""); setAssignedTo("");
+    setInterventionType("RETENTION"); setTitle(""); setDescription(""); setPriority("MEDIUM");
+    setActionPlan(""); setDueDate(""); setStatus("OPEN"); setOutcomeNotes("");
+  };
+
+  const startCreate = () => { resetForm(); setShowForm(true); setError(""); setNotice(""); };
+  const startEdit = (item) => {
+    setEditingItem(item); setEmployeeId(String(item.employee_id || ""));
+    setPredictionId(item.prediction_id ? String(item.prediction_id) : "");
+    setAssignedTo(item.assigned_to ? String(item.assigned_to) : "");
+    setInterventionType(item.intervention_type || "RETENTION"); setTitle(item.title || "");
+    setDescription(item.description || ""); setPriority(item.priority || "MEDIUM");
+    setActionPlan(item.action_plan || ""); setDueDate(item.due_date || "");
+    setStatus(item.status || "OPEN"); setOutcomeNotes(item.outcome_notes || "");
+    setShowForm(true); setError(""); setNotice("");
+  };
+
+  const saveItem = async (event) => {
+    event.preventDefault(); setSaving(true); setError(""); setNotice("");
+    try {
+      if (editingItem) {
+        await api.patch(`/interventions/${editingItem.id}`, {
+          assigned_to: assignedTo ? Number(assignedTo) : null,
+          priority, status, action_plan: actionPlan.trim() || null,
+          outcome_notes: outcomeNotes.trim() || null, due_date: dueDate || null,
+        });
+        setNotice("Intervention updated successfully.");
+      } else {
+        await api.post("/interventions/", {
+          employee_id: Number(employeeId),
+          prediction_id: predictionId ? Number(predictionId) : null,
+          assigned_to: assignedTo ? Number(assignedTo) : null,
+          intervention_type: interventionType.trim(),
+          title: title.trim(),
+          description: description.trim(),
+          priority,
+          action_plan: actionPlan.trim() || null,
+          due_date: dueDate || null,
+        });
+        setNotice("Intervention created successfully.");
+      }
+      setShowForm(false); resetForm(); await loadItems();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not save intervention. Check the employee, user, and prediction IDs.");
+    } finally { setSaving(false); }
+  };
+
+  const deleteItem = async (item) => {
+    if (!window.confirm(`Delete intervention "${item.title}"? This cannot be undone.`)) return;
+    setBusyId(item.id); setError(""); setNotice("");
+    try {
+      await api.delete(`/interventions/${item.id}`);
+      setItems((current) => current.filter((row) => row.id !== item.id));
+      setNotice("Intervention deleted successfully.");
+      await loadItems();
+    } catch (err) { setError(err.response?.data?.detail || "Could not delete intervention."); }
+    finally { setBusyId(null); }
+  };
+
+  const filtered = items.filter((item) => {
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q || [item.title, item.description, item.employee_name, item.intervention_type, String(item.employee_id), String(item.id)].some((value) => String(value || "").toLowerCase().includes(q));
+    return matchesSearch && (statusFilter === "ALL" || item.status === statusFilter) && (priorityFilter === "ALL" || item.priority === priorityFilter);
+  });
+  const dateText = (value) => {
+    if (!value) return "No due date";
+    const parsed = new Date(`${value}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString();
+  };
+  const statusColors = { OPEN: ["#dbeafe", "#1d4ed8"], IN_PROGRESS: ["#ffedd5", "#9a3412"], COMPLETED: ["#dcfce7", "#166534"], CANCELLED: ["#f3f4f6", "#4b5563"] };
+  const priorityColors = { LOW: ["#f3f4f6", "#4b5563"], MEDIUM: ["#e0f2fe", "#075985"], HIGH: ["#ffedd5", "#9a3412"], URGENT: ["#fee2e2", "#991b1b"] };
+
+  return (
+    <section style={{ display: "grid", gap: 18, color: "var(--text, #111827)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div><h2 style={{ margin: 0, fontSize: 24 }}>Employee Interventions</h2><p style={{ margin: "6px 0 0", color: "var(--muted, #6b7280)" }}>Coordinate employee retention actions and track their outcomes.</p></div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button type="button" style={buttonStyle} onClick={loadItems}>Refresh</button>{canManage && <button type="button" style={primaryStyle} onClick={startCreate}>Create intervention</button>}</div>
+      </div>
+      {error && <div role="alert" style={{ ...panelStyle, color: "#b91c1c", background: "#fef2f2", borderColor: "#fecaca" }}>{String(error)}</div>}
+      {notice && <div role="status" style={{ ...panelStyle, color: "#166534", background: "#f0fdf4", borderColor: "#bbf7d0" }}>{notice}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: 12 }}>
+        {[["Total", summary.total ?? 0], ["Open", summary.open ?? 0], ["In progress", summary.in_progress ?? 0], ["Completed", summary.completed ?? 0], ["Overdue", summary.overdue ?? 0], ["High priority", summary.high_priority ?? 0]].map(([label, value]) => <div key={label} style={panelStyle}><div style={{ fontSize: 13, color: "var(--muted, #6b7280)" }}>{label}</div><div style={{ fontSize: 27, fontWeight: 750, marginTop: 8 }}>{value}</div></div>)}
+      </div>
+
+      {showForm && <form onSubmit={saveItem} style={{ ...panelStyle, display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}><h3 style={{ margin: 0 }}>{editingItem ? `Update intervention #${editingItem.id}` : "Create an intervention"}</h3><button type="button" style={buttonStyle} onClick={() => { setShowForm(false); resetForm(); }}>Cancel</button></div>
+        {!editingItem ? <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+            <label style={{ display: "grid", gap: 6 }}>Employee ID<input style={fieldStyle} type="number" min="1" required value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} placeholder="Employee record ID" /></label>
+            <label style={{ display: "grid", gap: 6 }}>Prediction ID (optional)<input style={fieldStyle} type="number" min="1" value={predictionId} onChange={(e) => setPredictionId(e.target.value)} placeholder="Related attrition prediction ID" /></label>
+            <label style={{ display: "grid", gap: 6 }}>Assigned user ID (optional)<input style={fieldStyle} type="number" min="1" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} placeholder="Active user ID" /></label>
+            <label style={{ display: "grid", gap: 6 }}>Intervention type<input style={fieldStyle} required minLength={2} maxLength={80} value={interventionType} onChange={(e) => setInterventionType(e.target.value)} placeholder="RETENTION, COACHING..." /></label>
+          </div>
+          <label style={{ display: "grid", gap: 6 }}>Title<input style={fieldStyle} required minLength={3} maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Intervention title" /></label>
+          <label style={{ display: "grid", gap: 6 }}>Description<textarea style={fieldStyle} required minLength={3} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe the concern and intended support" /></label>
+        </> : null}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          <label style={{ display: "grid", gap: 6 }}>Priority<select style={fieldStyle} value={priority} onChange={(e) => setPriority(e.target.value)}>{["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => <option key={value}>{value}</option>)}</select></label>
+          <label style={{ display: "grid", gap: 6 }}>Status<select style={fieldStyle} value={status} onChange={(e) => setStatus(e.target.value)}>{["OPEN", "IN_PROGRESS", "COMPLETED", "CANCELLED"].map((value) => <option key={value}>{value}</option>)}</select></label>
+          <label style={{ display: "grid", gap: 6 }}>Due date<input style={fieldStyle} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></label>
+          {editingItem && <label style={{ display: "grid", gap: 6 }}>Assigned user ID (blank to clear)<input style={fieldStyle} type="number" min="1" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} placeholder="Active user ID" /></label>}
+        </div>
+        <label style={{ display: "grid", gap: 6 }}>Action plan<textarea style={fieldStyle} rows={3} value={actionPlan} onChange={(e) => setActionPlan(e.target.value)} placeholder="Planned support, follow-up, or retention action" /></label>
+        {editingItem && <label style={{ display: "grid", gap: 6 }}>Outcome notes<textarea style={fieldStyle} rows={3} value={outcomeNotes} onChange={(e) => setOutcomeNotes(e.target.value)} placeholder="Record the result or follow-up outcome" /></label>}
+        <div><button type="submit" style={primaryStyle} disabled={saving}>{saving ? "Saving..." : editingItem ? "Save changes" : "Create intervention"}</button></div>
+      </form>}
+
+      <div style={{ ...panelStyle, display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <input style={{ ...fieldStyle, flex: "1 1 220px" }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, employee, type, or ID..." />
+          <select style={{ ...fieldStyle, maxWidth: 190 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="ALL">All statuses</option>{["OPEN", "IN_PROGRESS", "COMPLETED", "CANCELLED"].map((value) => <option key={value}>{value}</option>)}</select>
+          <select style={{ ...fieldStyle, maxWidth: 170 }} value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}><option value="ALL">All priorities</option>{["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => <option key={value}>{value}</option>)}</select>
+        </div>
+        {loading ? <p>Loading interventions...</p> : filtered.length === 0 ? <div style={{ textAlign: "center", padding: 28, color: "var(--muted, #6b7280)" }}><h3 style={{ margin: "0 0 6px", color: "var(--text, #111827)" }}>No interventions found</h3><p style={{ margin: 0 }}>Try changing the filters or create an intervention.</p></div> : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {filtered.map((item) => <article key={item.id} style={{ border: "1px solid var(--border, #e5e7eb)", borderRadius: 12, padding: 16, display: "grid", gap: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                <div><h3 style={{ margin: 0, fontSize: 17 }}>{item.title}</h3><p style={{ margin: "5px 0 0", fontSize: 13, color: "var(--muted, #6b7280)" }}>Intervention #{item.id} · {item.employee_name || `Employee ${item.employee_id}`} · {item.intervention_type}</p></div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}><span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 12, fontWeight: 700, background: (statusColors[item.status] || statusColors.OPEN)[0], color: (statusColors[item.status] || statusColors.OPEN)[1] }}>{String(item.status || "OPEN").replace("_", " ")}</span><span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 12, fontWeight: 700, background: (priorityColors[item.priority] || priorityColors.MEDIUM)[0], color: (priorityColors[item.priority] || priorityColors.MEDIUM)[1] }}>{item.priority}</span></div>
+              </div>
+              <p style={{ margin: 0, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{item.description}</p>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13, color: "var(--muted, #6b7280)" }}><span>Due: {dateText(item.due_date)}</span>{item.prediction_id && <span>Prediction #{item.prediction_id}</span>}{item.assigned_to && <span>Assigned user #{item.assigned_to}</span>}</div>
+              {item.action_plan && <div style={{ padding: 10, borderRadius: 8, background: "var(--subtle-bg, #f9fafb)" }}><strong style={{ fontSize: 13 }}>Action plan</strong><p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{item.action_plan}</p></div>}
+              {item.outcome_notes && <div style={{ padding: 10, borderRadius: 8, background: "var(--subtle-bg, #f9fafb)" }}><strong style={{ fontSize: 13 }}>Outcome notes</strong><p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{item.outcome_notes}</p></div>}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button type="button" style={buttonStyle} onClick={() => startEdit(item)}>Update intervention</button>{canDelete && <button type="button" style={buttonStyle} disabled={busyId === item.id} onClick={() => deleteItem(item)}>{busyId === item.id ? "Deleting..." : "Delete"}</button>}</div>
+            </article>)}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
+function EmployeeRecommendationsWorkspace() {
+  const [overview, setOverview] = useState(null);
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("ALL");
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [employeeIdInput, setEmployeeIdInput] = useState("");
+  const [employeeLoading, setEmployeeLoading] = useState(false);
+  const [employeeError, setEmployeeError] = useState("");
+  const [employeeResult, setEmployeeResult] = useState(null);
+
+  const role = (localStorage.getItem("wf_role") || "").toUpperCase();
+  const canViewAll = ["ADMIN", "HR", "MANAGER"].includes(role);
+  const panelStyle = { background: "var(--card, #fff)", border: "1px solid var(--border, #e5e7eb)", borderRadius: 14, padding: 18, minWidth: 0 };
+  const fieldStyle = { width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid var(--border, #d1d5db)", borderRadius: 8, background: "var(--input-bg, #fff)", color: "var(--text, #111827)", font: "inherit" };
+  const buttonStyle = { padding: "9px 13px", borderRadius: 8, border: "1px solid var(--border, #d1d5db)", cursor: "pointer", fontWeight: 600, background: "var(--button-bg, #fff)", color: "var(--text, #111827)" };
+  const primaryStyle = { ...buttonStyle, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" };
+
+  const loadRecommendations = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      if (canViewAll) {
+        const [overviewResult, listResult] = await Promise.all([
+          api.get("/recommendations/overview"),
+          api.get("/recommendations/", { params: { limit: 200 } }),
+        ]);
+        setOverview(overviewResult.data || {});
+        setRecords(Array.isArray(listResult.data?.items) ? listResult.data.items : []);
+      } else {
+        setOverview(null);
+        setRecords([]);
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not load recommendations. HR overview access requires an Admin, HR, or Manager account.");
+    } finally { setLoading(false); }
+  }, [canViewAll]);
+
+  useEffect(() => { loadRecommendations(); }, [loadRecommendations]);
+
+  const openEmployeeRecommendations = async (idValue) => {
+    const id = Number(idValue);
+    if (!Number.isInteger(id) || id <= 0) {
+      setEmployeeError("Enter a valid employee ID.");
+      return;
+    }
+    setEmployeeLoading(true); setEmployeeError(""); setEmployeeResult(null);
+    try {
+      const result = await api.get(`/recommendations/employee/${id}`);
+      setEmployeeResult(result.data);
+      setSelectedEmployee(id);
+    } catch (err) {
+      setEmployeeError(err.response?.data?.detail || "Could not retrieve recommendations for this employee.");
+    } finally { setEmployeeLoading(false); }
+  };
+
+  const allRecommendations = records.flatMap((record) =>
+    (record.recommendations || []).map((recommendation, index) => ({
+      ...recommendation,
+      employee_id: record.employee_id,
+      employee_name: record.employee_name || `Employee ${record.employee_id}`,
+      recommendation_key: `${record.employee_id}-${index}-${recommendation.title}`,
+    }))
+  );
+  const categories = [...new Set(allRecommendations.map((item) => item.category).filter(Boolean))].sort();
+  const filtered = allRecommendations.filter((item) => {
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q || [item.title, item.reason, item.action, item.employee_name, item.category, String(item.employee_id)].some((value) => String(value || "").toLowerCase().includes(q));
+    return matchesSearch && (priorityFilter === "ALL" || item.priority === priorityFilter) && (categoryFilter === "ALL" || item.category === categoryFilter);
+  });
+  const priorityColors = { LOW: ["#dcfce7", "#166534"], MEDIUM: ["#fef3c7", "#92400e"], HIGH: ["#ffedd5", "#9a3412"], URGENT: ["#fee2e2", "#991b1b"] };
+  const dateText = (value) => value ? new Date(value).toLocaleString() : "Not available";
+
+  return (
+    <section style={{ display: "grid", gap: 18, color: "var(--text, #111827)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div><h2 style={{ margin: 0, fontSize: 24 }}>Employee Recommendations</h2><p style={{ margin: "6px 0 0", color: "var(--muted, #6b7280)" }}>Review evidence-based prompts for retention, development, and workforce support.</p></div>
+        <button type="button" style={buttonStyle} onClick={loadRecommendations}>Refresh</button>
+      </div>
+      {error && <div role="alert" style={{ ...panelStyle, color: "#b91c1c", background: "#fef2f2", borderColor: "#fecaca" }}>{String(error)}</div>}
+
+      {canViewAll && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
+        {[["Total employees", overview?.total_employees ?? "—"], ["High risk", overview?.high_risk_employees ?? "—"], ["Medium risk", overview?.medium_risk_employees ?? "—"], ["No predictions", overview?.employees_without_predictions ?? "—"], ["No published reviews", overview?.employees_without_published_reviews ?? "—"]].map(([label, value]) => <div key={label} style={panelStyle}><div style={{ fontSize: 13, color: "var(--muted, #6b7280)" }}>{label}</div><div style={{ fontSize: 27, fontWeight: 750, marginTop: 8 }}>{value}</div></div>)}
+      </div>}
+
+      <div style={{ ...panelStyle, display: "grid", gap: 12 }}>
+        <h3 style={{ margin: 0 }}>View recommendations for an employee</h3>
+        <p style={{ margin: 0, color: "var(--muted, #6b7280)" }}>{canViewAll ? "Enter an employee record ID to see recommendations generated from their latest prediction and published performance review." : "Enter your own employee record ID. Employees can only access their own recommendations."}</p>
+        <form onSubmit={(event) => { event.preventDefault(); openEmployeeRecommendations(employeeIdInput); }} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <input style={{ ...fieldStyle, flex: "1 1 200px", maxWidth: 340 }} type="number" min="1" required value={employeeIdInput} onChange={(event) => setEmployeeIdInput(event.target.value)} placeholder="Employee ID" />
+          <button style={primaryStyle} type="submit" disabled={employeeLoading}>{employeeLoading ? "Loading..." : "Get recommendations"}</button>
+        </form>
+        {employeeError && <div role="alert" style={{ color: "#b91c1c" }}>{employeeError}</div>}
+      </div>
+
+      {employeeResult && <div style={{ ...panelStyle, display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h3 style={{ margin: 0 }}>{employeeResult.employee_name || `Employee ${employeeResult.employee_id}`}</h3><p style={{ margin: "5px 0 0", color: "var(--muted, #6b7280)" }}>Employee ID: {employeeResult.employee_id} · Generated {dateText(employeeResult.generated_at)}</p></div><button type="button" style={buttonStyle} onClick={() => setEmployeeResult(null)}>Close</button></div>
+        {(employeeResult.recommendations || []).map((item, index) => {
+          const colors = priorityColors[item.priority] || priorityColors.MEDIUM;
+          return <article key={`${item.title}-${index}`} style={{ border: "1px solid var(--border, #e5e7eb)", borderRadius: 10, padding: 14, display: "grid", gap: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><h4 style={{ margin: 0 }}>{item.title}</h4><span style={{ padding: "4px 9px", borderRadius: 999, background: colors[0], color: colors[1], fontSize: 12, fontWeight: 700 }}>{item.priority} PRIORITY</span></div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted, #6b7280)" }}>{item.category}</div><p style={{ margin: 0 }}><strong>Reason:</strong> {item.reason}</p><p style={{ margin: 0 }}><strong>Suggested action:</strong> {item.action}</p>
+          </article>;
+        })}
+        <div style={{ borderRadius: 8, padding: 12, background: "var(--subtle-bg, #f9fafb)", fontSize: 13, lineHeight: 1.5 }}>{employeeResult.disclaimer || "These recommendations are decision-support suggestions and should be verified by HR before action."}</div>
+      </div>}
+
+      {canViewAll && <div style={{ ...panelStyle, display: "grid", gap: 14 }}>
+        <div><h3 style={{ margin: 0 }}>Organization recommendations</h3><p style={{ margin: "5px 0 0", color: "var(--muted, #6b7280)" }}>Browse generated suggestions by employee, priority, and category.</p></div>
+        {overview?.note && <div style={{ padding: 12, borderRadius: 8, background: "#fffbeb", color: "#92400e", fontSize: 13 }}>{overview.note}</div>}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <input style={{ ...fieldStyle, flex: "1 1 220px" }} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search employee or recommendation..." />
+          <select style={{ ...fieldStyle, maxWidth: 170 }} value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="ALL">All priorities</option>{["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => <option key={value}>{value}</option>)}</select>
+          <select style={{ ...fieldStyle, maxWidth: 190 }} value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="ALL">All categories</option>{categories.map((value) => <option key={value}>{value}</option>)}</select>
+        </div>
+        {loading ? <p>Loading recommendations...</p> : filtered.length === 0 ? <div style={{ textAlign: "center", padding: 26, color: "var(--muted, #6b7280)" }}>No recommendations match these filters.</div> : <div style={{ display: "grid", gap: 10 }}>
+          {filtered.map((item) => {
+            const colors = priorityColors[item.priority] || priorityColors.MEDIUM;
+            return <article key={item.recommendation_key} style={{ border: "1px solid var(--border, #e5e7eb)", borderRadius: 10, padding: 14, display: "grid", gap: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h4 style={{ margin: 0 }}>{item.title}</h4><p style={{ margin: "5px 0 0", fontSize: 13, color: "var(--muted, #6b7280)" }}>{item.employee_name} · Employee ID {item.employee_id} · {item.category}</p></div><span style={{ padding: "4px 9px", borderRadius: 999, background: colors[0], color: colors[1], fontSize: 12, fontWeight: 700, height: "fit-content" }}>{item.priority}</span></div>
+              <p style={{ margin: 0 }}><strong>Reason:</strong> {item.reason}</p><p style={{ margin: 0 }}><strong>Suggested action:</strong> {item.action}</p>
+              <div><button type="button" style={buttonStyle} onClick={() => { setEmployeeIdInput(String(item.employee_id)); openEmployeeRecommendations(item.employee_id); }}>View employee details</button></div>
+            </article>;
+          })}
+        </div>}
+      </div>}
+      <p style={{ margin: 0, color: "var(--muted, #6b7280)", fontSize: 12 }}>Recommendations are rule-based decision-support suggestions from available records, not definitive AI conclusions. Verify the evidence and discuss concerns with employees before making employment decisions.</p>
+    </section>
+  );
+}
+
+
+function WorkforceForecastingWorkspace() {
+  const [overview, setOverview] = useState(null);
+  const [monthly, setMonthly] = useState(null);
+  const [yearly, setYearly] = useState(null);
+  const [departments, setDepartments] = useState([]);
+  const [monthsCount, setMonthsCount] = useState(12);
+  const [yearsCount, setYearsCount] = useState(5);
+  const [loading, setLoading] = useState(true);
+  const [refreshingHistory, setRefreshingHistory] = useState(false);
+  const [error, setError] = useState("");
+
+  const panelStyle = { background: "var(--card, #fff)", border: "1px solid var(--border, #e5e7eb)", borderRadius: 14, padding: 18, minWidth: 0 };
+  const fieldStyle = { padding: "9px 11px", border: "1px solid var(--border, #d1d5db)", borderRadius: 8, background: "var(--input-bg, #fff)", color: "var(--text, #111827)", font: "inherit" };
+  const buttonStyle = { padding: "9px 13px", borderRadius: 8, border: "1px solid var(--border, #d1d5db)", cursor: "pointer", fontWeight: 600, background: "var(--button-bg, #fff)", color: "var(--text, #111827)" };
+
+  const loadOverview = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const [overviewResult, departmentResult] = await Promise.all([
+        api.get("/forecasting/overview"),
+        api.get("/forecasting/departments"),
+      ]);
+      setOverview(overviewResult.data || {});
+      setDepartments(Array.isArray(departmentResult.data) ? departmentResult.data : []);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not load workforce forecasting data. This module requires an Admin or HR account.");
+    } finally { setLoading(false); }
+  }, []);
+
+  const loadHistory = useCallback(async (monthCount = monthsCount, yearCount = yearsCount) => {
+    setRefreshingHistory(true); setError("");
+    try {
+      const [monthlyResult, yearlyResult] = await Promise.all([
+        api.get("/forecasting/monthly", { params: { months: monthCount } }),
+        api.get("/forecasting/yearly", { params: { years: yearCount } }),
+      ]);
+      setMonthly(monthlyResult.data || {});
+      setYearly(yearlyResult.data || {});
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not load workforce history.");
+    } finally { setRefreshingHistory(false); }
+  }, [monthsCount, yearsCount]);
+
+  useEffect(() => { loadOverview(); loadHistory(12, 5); }, [loadOverview, loadHistory]);
+
+  const number = (value) => Number(value || 0).toLocaleString();
+  const monthLabel = (value) => {
+    if (!value) return "—";
+    const parsed = new Date(`${value}-01T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  };
+  const maxBar = (rows, key) => Math.max(1, ...rows.map((row) => Number(row[key] || 0)));
+  const barColor = (key) => key === "high_risk_predictions" ? "#dc2626" : key === "predictions_generated" ? "#2563eb" : "#16a34a";
+
+  const renderTrend = (title, rows, labelKey, series, note) => (
+    <div style={{ ...panelStyle, display: "grid", gap: 14 }}>
+      <div><h3 style={{ margin: 0 }}>{title}</h3>{note && <p style={{ margin: "5px 0 0", color: "var(--muted, #6b7280)", fontSize: 13 }}>{note}</p>}</div>
+      {rows.length === 0 ? <p>No historical records available.</p> : <>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>{series.map((item) => <span key={item.key} style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 3, background: barColor(item.key) }} />{item.label}</span>)}</div>
+        <div style={{ display: "grid", gap: 13 }}>
+          {rows.map((row) => {
+            const maximum = maxBar(rows, series[0].key);
+            return <div key={String(row[labelKey])} style={{ display: "grid", gridTemplateColumns: "minmax(78px, 110px) 1fr", gap: 12, alignItems: "center" }}>
+              <strong style={{ fontSize: 12 }}>{labelKey === "month" ? monthLabel(row[labelKey]) : row[labelKey]}</strong>
+              <div style={{ display: "grid", gap: 5 }}>
+                {series.map((item) => {
+                  const value = Number(row[item.key] || 0);
+                  const scale = Math.max(maximum, ...series.map((entry) => maxBar(rows, entry.key)));
+                  return <div key={item.key} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 40px", gap: 8, alignItems: "center" }}><div title={`${item.label}: ${value}`} style={{ height: 10, borderRadius: 99, background: "var(--subtle-bg, #f3f4f6)", overflow: "hidden" }}><div style={{ width: `${Math.min(100, value / scale * 100)}%`, height: "100%", background: barColor(item.key), borderRadius: 99, minWidth: value ? 2 : 0 }} /></div><span style={{ fontSize: 12, textAlign: "right" }}>{number(value)}</span></div>;
+                })}
+              </div>
+            </div>;
+          })}
+        </div>
+      </>}
+    </div>
+  );
+
+  return (
+    <section style={{ display: "grid", gap: 18, color: "var(--text, #111827)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div><h2 style={{ margin: 0, fontSize: 24 }}>Workforce Forecasting</h2><p style={{ margin: "6px 0 0", color: "var(--muted, #6b7280)" }}>Explore workforce trends, prediction activity, and department-level risk signals.</p></div>
+        <button type="button" style={buttonStyle} onClick={() => { loadOverview(); loadHistory(); }}>Refresh data</button>
+      </div>
+      {error && <div role="alert" style={{ ...panelStyle, color: "#b91c1c", background: "#fef2f2", borderColor: "#fecaca" }}>{String(error)}</div>}
+      {loading ? <div style={panelStyle}>Loading workforce overview...</div> : overview && <>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))", gap: 12 }}>
+          {[["Active employees", overview.active_employees], ["Total employees", overview.total_employees], ["Active departments", overview.active_departments], ["Predictions this month", overview.predictions_this_month], ["High-risk predictions this month", overview.high_risk_predictions_this_month]].map(([label, value]) => <div key={label} style={panelStyle}><div style={{ fontSize: 13, color: "var(--muted, #6b7280)" }}>{label}</div><div style={{ fontSize: 27, fontWeight: 750, marginTop: 8 }}>{number(value)}</div></div>)}
+        </div>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #6b7280)" }}>As of {overview.as_of || "—"}. {overview.note}</p>
+      </>}
+
+      <div style={{ ...panelStyle, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div><h3 style={{ margin: 0 }}>Historical activity range</h3><p style={{ margin: "5px 0 0", fontSize: 13, color: "var(--muted, #6b7280)" }}>Choose the period displayed in the monthly and yearly charts.</p></div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13 }}>Months<select style={fieldStyle} value={monthsCount} onChange={(e) => setMonthsCount(Number(e.target.value))}>{[3, 6, 12, 18, 24, 36, 60].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+          <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13 }}>Years<select style={fieldStyle} value={yearsCount} onChange={(e) => setYearsCount(Number(e.target.value))}>{[1, 3, 5, 10, 15, 20].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+          <button type="button" style={buttonStyle} disabled={refreshingHistory} onClick={() => loadHistory(monthsCount, yearsCount)}>{refreshingHistory ? "Loading..." : "Apply range"}</button>
+        </div>
+      </div>
+
+      {monthly && renderTrend("Monthly workforce activity", monthly.history || [], "month", [{ key: "employees_joined", label: "Employees joined" }, { key: "predictions_generated", label: "Predictions generated" }, { key: "high_risk_predictions", label: "High-risk predictions" }], monthly.note)}
+      {yearly && renderTrend("Yearly workforce activity", yearly.history || [], "year", [{ key: "employees_joined", label: "Employees joined" }, { key: "predictions_generated", label: "Predictions generated" }, { key: "high_risk_predictions", label: "High-risk predictions" }], yearly.note)}
+
+      <div style={{ ...panelStyle, display: "grid", gap: 12 }}>
+        <div><h3 style={{ margin: 0 }}>Department workforce summary</h3><p style={{ margin: "5px 0 0", color: "var(--muted, #6b7280)", fontSize: 13 }}>Current headcount and latest high-risk prediction signals by department.</p></div>
+        {departments.length === 0 ? <p>No departments found.</p> : <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 650 }}><thead><tr>{["Department", "Status", "Active employees", "Total employees", "Latest high-risk employees"].map((label) => <th key={label} style={{ textAlign: "left", padding: "11px 10px", borderBottom: "1px solid var(--border, #e5e7eb)", fontSize: 12, color: "var(--muted, #6b7280)" }}>{label}</th>)}</tr></thead><tbody>{departments.map((department) => <tr key={department.department_id}><td style={{ padding: "12px 10px", borderBottom: "1px solid var(--border, #e5e7eb)", fontWeight: 600 }}>{department.department}</td><td style={{ padding: "12px 10px", borderBottom: "1px solid var(--border, #e5e7eb)" }}><span style={{ borderRadius: 999, padding: "4px 8px", fontSize: 12, background: department.active ? "#dcfce7" : "#f3f4f6", color: department.active ? "#166534" : "#4b5563" }}>{department.active ? "Active" : "Inactive"}</span></td><td style={{ padding: "12px 10px", borderBottom: "1px solid var(--border, #e5e7eb)" }}>{number(department.active_employees)}</td><td style={{ padding: "12px 10px", borderBottom: "1px solid var(--border, #e5e7eb)" }}>{number(department.total_employees)}</td><td style={{ padding: "12px 10px", borderBottom: "1px solid var(--border, #e5e7eb)", fontWeight: 700, color: department.employees_with_latest_high_risk ? "#dc2626" : "inherit" }}>{number(department.employees_with_latest_high_risk)}</td></tr>)}</tbody></table></div>}
+      </div>
+      <div style={{ borderRadius: 10, padding: 14, background: "#fffbeb", color: "#92400e", fontSize: 13, lineHeight: 1.55 }}>Important: this module displays historical workforce activity and current model prediction signals. It does not calculate validated future resignation forecasts. The backend notes that reliable departure analysis requires employee exit-date data.</div>
+    </section>
+  );
+}
+
+export default function HRMSWorkspace({ moduleKey }) {
+  const config = MODULES[moduleKey];
+  const [data, setData] = useState([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const loadData = useCallback(async () => {
+    if (!config) {
+      setError("This module is not configured.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await api.get(config.endpoint);
+      const result = response.data;
+
+      setData(
+        Array.isArray(result)
+          ? result
+          : result && typeof result === "object"
+            ? [result]
+            : []
+      );
+    } catch (err) {
+      setData([]);
+      setError(
+        err.response?.data?.detail ||
+        `Could not load ${config.title}. Check your access permissions and backend.`
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [config]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  if (!config) {
+    return <div className="alert error">Unknown HRMS module.</div>;
+  }
+
+  if (moduleKey === "leaves") {
+    return <LeaveManagementWorkspace />;
+  }
+
+  if (moduleKey === "shifts") {
+    return <ShiftManagementWorkspace />;
+  }
+  if (moduleKey === "reviews") {
+    return <PerformanceReviewWorkspace />;
+  }
+  if (moduleKey === "notifications") {
+    return <NotificationsWorkspace />;
+  }
+  if (moduleKey === "tasks") {
+    return <WorkflowTaskWorkspace />;
+  }
+  if (moduleKey === "interventions") {
+    return <InterventionManagementWorkspace />;
+  }
+  if (moduleKey === "recommendations") {
+    return <EmployeeRecommendationsWorkspace />;
+  }
+  if (moduleKey === "forecasting") {
+    return <WorkforceForecastingWorkspace />;
+  }
+
+  if (moduleKey === "payroll") {
+    return <PayrollManagementWorkspace />;
+  }
+
+  return (
+    <section className="hrms-workspace">
+      <div className="hrms-module-heading">
+        <div>
+          <span className="hrms-eyebrow">WORKFORCE AI PRO</span>
+          <h2>{config.title}</h2>
+          <p>{config.description}</p>
+        </div>
+
+        <button
+          className="secondary-btn"
+          onClick={loadData}
+          disabled={loading}
+          type="button"
+        >
+          {loading ? (
+            <LoaderCircle size={16} className="hrms-spin" />
+          ) : (
+            <RefreshCw size={16} />
+          )}
+          Refresh
+        </button>
+      </div>
+
+      <div className="hrms-module-stats">
+        <article>
+          <span>Records loaded</span>
+          <strong>{data.length}</strong>
+        </article>
+        <article>
+          <span>Connection</span>
+          <strong>{error ? "Needs attention" : loading ? "Loading" : "Connected"}</strong>
+        </article>
+      </div>
+
+      {error && (
+        <div className="alert error hrms-alert">
+          <AlertCircle size={17} />
+          <span>{String(error)}</span>
+        </div>
+      )}
+
+      {message && (
+        <div className="alert success">
+          <CheckCircle2 size={17} />
+          {message}
+        </div>
+      )}
+
+      <div className="hrms-data-card">
+        <div className="hrms-data-toolbar">
+          <div>
+            <h3>{config.title} records</h3>
+            <p>Data retrieved from your authenticated backend.</p>
+          </div>
+
+          <input
+            aria-label="Search records"
+            placeholder="Search records..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </div>
+
+        {loading && data.length === 0 ? (
+          <div className="hrms-empty">Loading records…</div>
+        ) : (
+          <DataTable rows={data} search={search} />
+        )}
+      </div>
+    </section>
+  );
+}

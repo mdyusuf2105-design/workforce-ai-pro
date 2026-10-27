@@ -1,0 +1,312 @@
+import { useCallback, useEffect, useState } from "react";
+import axios from "axios";
+import {
+  RefreshCw,
+  Search,
+  AlertCircle,
+  CheckCircle2,
+  LoaderCircle,
+} from "lucide-react";
+
+const api = axios.create({
+  baseURL: "http://127.0.0.1:8000/api",
+});
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("wf_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+const MODULES = {
+  leaves: {
+    title: "Leave Management",
+    description: "Review employee leave requests and their current status.",
+    endpoint: "/leaves/",
+  },
+  payroll: {
+    title: "Payroll Management",
+    description: "Review payroll records and payment status.",
+    endpoint: "/payroll/",
+  },
+  shifts: {
+    title: "Shift Management",
+    description: "View configured employee shifts.",
+    endpoint: "/shifts/",
+  },
+  reviews: {
+    title: "Performance Reviews",
+    description: "Review employee performance records.",
+    endpoint: "/performance-reviews/",
+  },
+  notifications: {
+    title: "Notifications",
+    description: "View and manage your notifications.",
+    endpoint: "/notifications/",
+  },
+  tasks: {
+    title: "Workflow Tasks",
+    description: "Track workforce workflow tasks.",
+    endpoint: "/workflow-tasks/",
+  },
+  interventions: {
+    title: "Retention Interventions",
+    description: "Monitor interventions for workforce retention.",
+    endpoint: "/interventions/",
+  },
+  recommendations: {
+    title: "AI Recommendations",
+    description: "Explore workforce retention recommendations.",
+    endpoint: "/recommendations/",
+  },
+  forecasting: {
+    title: "Workforce Forecasting",
+    description: "View workforce forecast data.",
+    endpoint: "/forecasting/overview",
+  },
+  risk: {
+    title: "Risk Monitoring",
+    description: "Monitor workforce risk indicators.",
+    endpoint: "/risk-monitoring/summary",
+  },
+  alerts: {
+    title: "Smart Alerts",
+    description: "Review high-risk workforce alerts.",
+    endpoint: "/smart-alerts/overview",
+  },
+  stability: {
+    title: "Workforce Stability",
+    description: "Review workforce stability and retention priorities.",
+    endpoint: "/workforce-stability/overview",
+  },
+  activity: {
+    title: "Activity Feed",
+    description: "Review recent workforce activity.",
+    endpoint: "/activity/feed",
+  },
+  audit: {
+    title: "Audit Logs",
+    description: "Review recorded system audit events.",
+    endpoint: "/audit-logs/",
+  },
+  datasets: {
+    title: "AI Datasets",
+    description: "View datasets available for model training.",
+    endpoint: "/datasets/",
+  },
+  chat: {
+    title: "Workforce Chat",
+    description: "View workforce messages.",
+    endpoint: "/chat/messages",
+  },
+  documents: {
+    title: "Employee Documents",
+    description: "View uploaded employee documents.",
+    endpoint: "/documents/",
+  },
+  attendanceReports: {
+    title: "Attendance Reports",
+    description: "Review attendance reporting data.",
+    endpoint: "/attendance/reports",
+  },
+  attritionAnalytics: {
+    title: "Attrition Analytics",
+    description: "Explore attrition risk analytics.",
+    endpoint: "/attrition-analytics/overview",
+  },
+  permissions: {
+    title: "My Permissions",
+    description: "View the permissions associated with your account.",
+    endpoint: "/permissions/me",
+  },
+};
+
+function readableLabel(value) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function displayValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+function DataTable({ rows, search }) {
+  const filtered = rows.filter((row) =>
+    JSON.stringify(row).toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (!filtered.length) {
+    return (
+      <div className="hrms-empty">
+        <Search size={24} />
+        <h3>No records found</h3>
+        <p>Try another search or refresh the data.</p>
+      </div>
+    );
+  }
+
+  const columns = [
+    ...new Set(filtered.flatMap((row) => Object.keys(row))),
+  ].slice(0, 9);
+
+  return (
+    <div className="hrms-table-wrap">
+      <table className="hrms-table">
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column}>{readableLabel(column)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((row, index) => (
+            <tr key={row.id ?? row.employee_id ?? index}>
+              {columns.map((column) => (
+                <td key={column}>
+                  {displayValue(row[column]).length > 100
+                    ? `${displayValue(row[column]).slice(0, 100)}…`
+                    : displayValue(row[column])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default function HRMSWorkspace({ moduleKey }) {
+  const config = MODULES[moduleKey];
+  const [data, setData] = useState([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const loadData = useCallback(async () => {
+    if (!config) {
+      setError("This module is not configured.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await api.get(config.endpoint);
+      const result = response.data;
+
+      setData(
+        Array.isArray(result)
+          ? result
+          : result && typeof result === "object"
+            ? [result]
+            : []
+      );
+    } catch (err) {
+      setData([]);
+      setError(
+        err.response?.data?.detail ||
+        `Could not load ${config.title}. Check your access permissions and backend.`
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [config]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  if (!config) {
+    return <div className="alert error">Unknown HRMS module.</div>;
+  }
+
+  return (
+    <section className="hrms-workspace">
+      <div className="hrms-module-heading">
+        <div>
+          <span className="hrms-eyebrow">WORKFORCE AI PRO</span>
+          <h2>{config.title}</h2>
+          <p>{config.description}</p>
+        </div>
+
+        <button
+          className="secondary-btn"
+          onClick={loadData}
+          disabled={loading}
+          type="button"
+        >
+          {loading ? (
+            <LoaderCircle size={16} className="hrms-spin" />
+          ) : (
+            <RefreshCw size={16} />
+          )}
+          Refresh
+        </button>
+      </div>
+
+      <div className="hrms-module-stats">
+        <article>
+          <span>Records loaded</span>
+          <strong>{data.length}</strong>
+        </article>
+        <article>
+          <span>Connection</span>
+          <strong>{error ? "Needs attention" : loading ? "Loading" : "Connected"}</strong>
+        </article>
+      </div>
+
+      {error && (
+        <div className="alert error hrms-alert">
+          <AlertCircle size={17} />
+          <span>{String(error)}</span>
+        </div>
+      )}
+
+      {message && (
+        <div className="alert success">
+          <CheckCircle2 size={17} />
+          {message}
+        </div>
+      )}
+
+      <div className="hrms-data-card">
+        <div className="hrms-data-toolbar">
+          <div>
+            <h3>{config.title} records</h3>
+            <p>Data retrieved from your authenticated backend.</p>
+          </div>
+
+          <input
+            aria-label="Search records"
+            placeholder="Search records..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </div>
+
+        {loading && data.length === 0 ? (
+          <div className="hrms-empty">Loading records…</div>
+        ) : (
+          <DataTable rows={data} search={search} />
+        )}
+      </div>
+    </section>
+  );
+}
