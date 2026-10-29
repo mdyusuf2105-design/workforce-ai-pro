@@ -2292,3 +2292,1021 @@ table {
   .permissions-items { padding: 0 15px; }
 }
 
+/* =========================================================
+   WORKFORCE AI PRO — UI POLISH
+   CSS only: preserves existing React components and auth
+   ========================================================= */
+
+:root {
+  --wf-primary: #3157d5;
+  --wf-primary-hover: #2446b8;
+  --wf-primary-light: #edf2ff;
+  --wf-background: #f5f7fb;
+  --wf-surface: #ffffff;
+  --wf-text: #18243b;
+  --wf-muted: #718096;
+  --wf-border: #e3e8f1;
+  --wf-success: #16845b;
+  --wf-danger: #d14343;
+  --wf-radius: 12px;
+  --wf-shadow: 0 4px 18px rgba(28, 45, 85, 0.055);
+}
+
+/* ---------- Global foundation ---------- */
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--wf-background);
+  color: var(--wf-text);
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+/* ---------- Main workspace ---------- */
+
+main,
+main > div,
+[class*="workspace-content"],
+[class*="main-content"],
+[class*="page-content"] {
+  min-width: 0;
+}
+
+main {
+  color: var(--wf-text);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--wf-text);
+  letter-spacing: -0.035em;
+  line-height: 1.35;
+}
+
+h1 {
+  font-size: clamp(24px, 2vw, 32px);
+  font-weight: 750;
+}
+
+h2 {
+  font-size: 21px;
+  font-weight: 700;
+}
+
+h3 {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+p {
+  line-height: 1.65;
+}
+
+/* ---------- Sidebar ---------- */
+
+aside {
+  scrollbar-width: thin;
+  scrollbar-color: #344b70 transparent;
+}
+
+aside nav,
+aside [role="navigation"] {
+  padding-top: 8px;
+}
+
+aside a,
+aside button {
+  border-radius: 8px;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+aside a:hover,
+aside button:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+aside a:focus-visible,
+aside button:focus-visible {
+  outline: 2px solid #8cb6ff;
+  outline-offset: 2px;
+}
+
+/* ---------- Cards and panels ---------- */
+
+[class*="card"],
+[class*="Card"],
+[class*="panel"],
+[class*="Panel"],
+[class*="section-card"] {
+  min-width: 0;
+}
+
+[class*="stat-card"],
+[class*="StatCard"],
+[class*="metric-card"],
+[class*="MetricCard"],
+[class*="analytics-card"] {
+  background: var(--wf-surface);
+  border: 1px solid var(--wf-border);
+  border-radius: var(--wf-radius);
+  box-shadow: var(--wf-shadow);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+[class*="stat-card"]:hover,
+[class*="metric-card"]:hover,
+[class*="analytics-card"]:hover {
+  border-color: #d0dafa;
+  box-shadow: 0 8px 24px rgba(28, 45, 85, 0.08);
+  transform: translateY(-2px);
+}
+
+/* ---------- Buttons ---------- */
+
+button,
+input[type="button"],
+input[type="submit"] {
+  cursor: pointer;
+}
+
+main button,
+main input[type="button"],
+main input[type="submit"] {
+  min-height: 34px;
+  padding: 8px 13px;
+  border: 1px solid #dce3ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #34435c;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+main button:hover:not(:disabled),
+main input[type="button"]:hover:not(:disabled),
+main input[type="submit"]:hover:not(:disabled) {
+  border-color: #bdcaf0;
+  background: #f3f6ff;
+  color: var(--wf-primary);
+}
+
+main button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+main button:disabled,
+main input[type="submit"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+main button:focus-visible,
+main input:focus-visible,
+main select:focus-visible,
+main textarea:focus-visible {
+  outline: 3px solid rgba(49, 87, 213, 0.15);
+  outline-offset: 1px;
+}
+
+/* ---------- Form controls ---------- */
+
+main input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="submit"]):not([type="button"]),
+main select,
+main textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 9px 12px;
+  border: 1px solid #dce3ed;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--wf-text);
+  font-size: 12px;
+  line-height: 1.5;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+main textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+main input::placeholder,
+main textarea::placeholder {
+  color: #9aa6b8;
+}
+
+main input:focus,
+main select:focus,
+main textarea:focus {
+  border-color: #7896f0;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(49, 87, 213, 0.09);
+}
+
+main input[type="file"] {
+  display: block;
+  max-width: 100%;
+  padding: 10px;
+  border: 1px dashed #cbd5e4;
+  border-radius: 8px;
+  background: #f9faff;
+  color: var(--wf-muted);
+  font-size: 12px;
+}
+
+main input[type="checkbox"],
+main input[type="radio"] {
+  accent-color: var(--wf-primary);
+}
+
+/* ---------- Labels and helper text ---------- */
+
+main label {
+  color: #46546b;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+main small {
+  color: var(--wf-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* ---------- Tables ---------- */
+
+main table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--wf-border);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+main thead th {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--wf-border);
+  background: #f7f9fd;
+  color: #65738a;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.055em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+main tbody td {
+  padding: 13px 14px;
+  border-bottom: 1px solid #edf0f5;
+  color: #405069;
+  vertical-align: middle;
+}
+
+main tbody tr:last-child td {
+  border-bottom: none;
+}
+
+main tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+main tbody tr:hover {
+  background: #f7f9ff;
+}
+
+/* ---------- Status messages ---------- */
+
+main [role="alert"] {
+  padding: 11px 14px;
+  border: 1px solid #f1caca;
+  border-radius: 9px;
+  background: #fff5f5;
+  color: #b42332;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+main [role="status"] {
+  padding: 11px 14px;
+  border: 1px solid #ccebdc;
+  border-radius: 9px;
+  background: #f0fbf5;
+  color: #16734d;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ---------- Links ---------- */
+
+main a {
+  color: var(--wf-primary);
+  text-decoration: none;
+}
+
+main a:hover {
+  color: var(--wf-primary-hover);
+  text-decoration: underline;
+}
+
+/* ---------- Scrollbars ---------- */
+
+main,
+aside {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd4e3 transparent;
+}
+
+main::-webkit-scrollbar,
+aside::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+main::-webkit-scrollbar-thumb,
+aside::-webkit-scrollbar-thumb {
+  border-radius: 20px;
+  background: #cbd4e3;
+}
+
+/* ---------- Responsive layout ---------- */
+
+@media (max-width: 900px) {
+  main {
+    padding: 18px !important;
+  }
+
+  main table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  main thead th,
+  main tbody td {
+    padding: 10px;
+  }
+}
+
+@media (max-width: 600px) {
+  h1 {
+    font-size: 24px;
+  }
+
+  h2 {
+    font-size: 19px;
+  }
+
+  main {
+    padding: 14px !important;
+  }
+
+  main button {
+    max-width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+
+/* ==========================================================
+   WORKFORCE AI PRO — PREMIUM ENTERPRISE UI ENHANCEMENT
+   Append to the bottom of frontend/src/App.css
+   ========================================================== */
+
+:root {
+  --premium-primary: #3458db;
+  --premium-primary-dark: #2646bd;
+  --premium-primary-soft: #edf2ff;
+  --premium-ink: #17233b;
+  --premium-muted: #7c889d;
+  --premium-border: #e5eaf2;
+  --premium-page: #f5f7fc;
+  --premium-white: #ffffff;
+  --premium-radius: 14px;
+  --premium-shadow: 0 4px 16px rgba(25, 42, 82, 0.045);
+  --premium-shadow-hover: 0 10px 28px rgba(25, 42, 82, 0.085);
+}
+
+/* 1. Global appearance */
+
+body {
+  background: var(--premium-page);
+  color: var(--premium-ink);
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: #dbe5ff;
+  color: #1e347d;
+}
+
+/* 2. Refined page headings */
+
+main h1,
+main h2,
+main h3,
+main h4 {
+  color: var(--premium-ink);
+}
+
+main h1 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: clamp(25px, 2vw, 32px);
+  font-weight: 780;
+  letter-spacing: -1.15px;
+}
+
+main h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 21px;
+  font-weight: 740;
+  letter-spacing: -0.6px;
+}
+
+main h3 {
+  margin-bottom: 10px;
+  font-size: 15px;
+  font-weight: 720;
+  letter-spacing: -0.25px;
+}
+
+main p {
+  color: #65738b;
+  line-height: 1.7;
+}
+
+/* 3. Consistent section spacing */
+
+main section {
+  margin-bottom: 26px;
+}
+
+main section > h2,
+main section > h3 {
+  margin-bottom: 14px;
+}
+
+/* 4. Cards and dashboard panels */
+
+main [class*="card"],
+main [class*="Card"],
+main [class*="panel"],
+main [class*="Panel"] {
+  border-color: var(--premium-border);
+  border-radius: var(--premium-radius);
+}
+
+main [class*="card"],
+main [class*="Card"],
+main [class*="panel"],
+main [class*="Panel"] {
+  box-shadow: var(--premium-shadow);
+}
+
+main [class*="stat"],
+main [class*="Stat"],
+main [class*="metric"],
+main [class*="Metric"] {
+  transition:
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+
+main [class*="stat"]:hover,
+main [class*="Stat"]:hover,
+main [class*="metric"]:hover,
+main [class*="Metric"]:hover {
+  border-color: #cdd8fa;
+  box-shadow: var(--premium-shadow-hover);
+}
+
+/* 5. Modern primary buttons */
+
+main button,
+main input[type="button"],
+main input[type="submit"] {
+  min-height: 36px;
+  padding: 9px 15px;
+  border: 1px solid #dfe5f0;
+  border-radius: 9px;
+  background: #fff;
+  color: #35445e;
+  font-size: 12px;
+  font-weight: 680;
+  box-shadow: 0 1px 2px rgba(25, 42, 82, 0.025);
+}
+
+main button:hover:not(:disabled),
+main input[type="button"]:hover:not(:disabled) {
+  border-color: #c6d3fb;
+  background: #f2f5ff;
+  color: var(--premium-primary);
+}
+
+main button:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+/* Give buttons containing common action labels a primary treatment. */
+main button[type="submit"],
+main input[type="submit"] {
+  border-color: var(--premium-primary);
+  background: var(--premium-primary);
+  color: #fff;
+  box-shadow: 0 3px 8px rgba(52, 88, 219, 0.15);
+}
+
+main button[type="submit"]:hover:not(:disabled),
+main input[type="submit"]:hover:not(:disabled) {
+  border-color: var(--premium-primary-dark);
+  background: var(--premium-primary-dark);
+  color: #fff;
+}
+
+/* 6. Professional form controls */
+
+main input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="submit"]):not([type="button"]),
+main select,
+main textarea {
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid #dce3ef;
+  border-radius: 9px;
+  background-color: #fff;
+  color: var(--premium-ink);
+  font-size: 12px;
+  box-shadow: inset 0 1px 2px rgba(20, 35, 65, 0.015);
+}
+
+main input:hover,
+main select:hover,
+main textarea:hover {
+  border-color: #c4cee0;
+}
+
+main input:focus,
+main select:focus,
+main textarea:focus {
+  border-color: #8ca4f4;
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(52, 88, 219, 0.09);
+}
+
+main input::placeholder,
+main textarea::placeholder {
+  color: #a0aabc;
+}
+
+main textarea {
+  min-height: 96px;
+}
+
+main label {
+  display: inline-block;
+  margin-bottom: 6px;
+  color: #43516a;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/* 7. Cleaner file upload areas */
+
+main input[type="file"] {
+  width: 100%;
+  padding: 12px;
+  border: 1px dashed #c9d4e6;
+  border-radius: 10px;
+  background: #f8faff;
+  color: #64738a;
+  font-size: 12px;
+}
+
+main input[type="file"]:hover {
+  border-color: #91a8f0;
+  background: #f0f4ff;
+}
+
+/* 8. Enterprise table styling */
+
+main table {
+  border: 1px solid var(--premium-border);
+  border-radius: 12px;
+  background: #fff;
+  border-spacing: 0;
+  overflow: hidden;
+  font-size: 12px;
+}
+
+main thead th {
+  padding: 14px 15px;
+  border-bottom: 1px solid var(--premium-border);
+  background: #f8faff;
+  color: #6d7b91;
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.065em;
+  text-transform: uppercase;
+}
+
+main tbody td {
+  padding: 14px 15px;
+  border-bottom: 1px solid #edf0f6;
+  color: #44536b;
+  line-height: 1.55;
+}
+
+main tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+main tbody tr:hover {
+  background: #f7f9ff;
+}
+
+/* 9. Improve horizontal scrolling on data-heavy tables */
+
+main table {
+  max-width: 100%;
+}
+
+main table th,
+main table td {
+  overflow-wrap: anywhere;
+}
+
+/* 10. Better links */
+
+main a {
+  color: var(--premium-primary);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+main a:hover {
+  color: var(--premium-primary-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* 11. Consistent alerts */
+
+main [role="alert"] {
+  border: 1px solid #f0cccc;
+  border-radius: 10px;
+  background: #fff6f6;
+  color: #a52f3c;
+  line-height: 1.65;
+}
+
+main [role="status"] {
+  border: 1px solid #cce9da;
+  border-radius: 10px;
+  background: #f1fbf5;
+  color: #18734e;
+  line-height: 1.65;
+}
+
+/* 12. Accessible focus indicators */
+
+main button:focus-visible,
+main a:focus-visible,
+main input:focus-visible,
+main select:focus-visible,
+main textarea:focus-visible {
+  outline: 3px solid rgba(52, 88, 219, 0.2);
+  outline-offset: 2px;
+}
+
+/* 13. Refined scrollbars */
+
+main,
+aside {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd4e4 transparent;
+}
+
+main::-webkit-scrollbar,
+aside::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+main::-webkit-scrollbar-thumb,
+aside::-webkit-scrollbar-thumb {
+  border-radius: 20px;
+  background: #cbd4e4;
+}
+
+/* 14. Responsive improvements */
+
+@media (max-width: 1024px) {
+  main table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 768px) {
+  main h1 {
+    font-size: 25px;
+  }
+
+  main h2 {
+    font-size: 19px;
+  }
+
+  main section {
+    margin-bottom: 20px;
+  }
+
+  main button {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  main h1 {
+    font-size: 23px;
+  }
+
+  main h2 {
+    font-size: 18px;
+  }
+
+  main thead th,
+  main tbody td {
+    padding: 10px;
+  }
+}
+
+/* 15. Reduced-motion support */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* ==========================================
+   PREMIUM KPI / SUMMARY CARDS
+   ========================================== */
+
+.dashboard-stats,
+.stats-grid,
+.metrics-grid,
+.summary-grid,
+.analytics-summary,
+.alert-summary,
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  width: 100%;
+  margin: 22px 0;
+  align-items: stretch;
+}
+
+/* Individual statistic cards */
+.dashboard-stats > *,
+.stats-grid > *,
+.metrics-grid > *,
+.summary-grid > *,
+.analytics-summary > *,
+.alert-summary > *,
+.kpi-grid > * {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 118px;
+  padding: 22px 22px 20px;
+  overflow: hidden;
+
+  background: linear-gradient(145deg, #ffffff 0%, #f9fbff 100%);
+  border: 1px solid #e6ebf3;
+  border-radius: 16px;
+
+  box-shadow:
+    0 2px 5px rgba(25, 42, 70, 0.025),
+    0 8px 24px rgba(25, 42, 70, 0.045);
+
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.6;
+
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+
+/* Accent line */
+.dashboard-stats > *::before,
+.stats-grid > *::before,
+.metrics-grid > *::before,
+.summary-grid > *::before,
+.analytics-summary > *::before,
+.alert-summary > *::before,
+.kpi-grid > *::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #14b8a6, #5eead4);
+}
+
+/* Hover */
+.dashboard-stats > *:hover,
+.stats-grid > *:hover,
+.metrics-grid > *:hover,
+.summary-grid > *:hover,
+.analytics-summary > *:hover,
+.alert-summary > *:hover,
+.kpi-grid > *:hover {
+  transform: translateY(-3px);
+  border-color: #cbd8eb;
+  box-shadow: 0 12px 28px rgba(25, 42, 70, 0.085);
+}
+
+/* Numbers and values */
+.dashboard-stats strong,
+.stats-grid strong,
+.metrics-grid strong,
+.summary-grid strong,
+.analytics-summary strong,
+.alert-summary strong,
+.kpi-grid strong {
+  display: block;
+  color: #172b4d;
+  font-size: clamp(25px, 2vw, 34px);
+  font-weight: 750;
+  line-height: 1.15;
+  letter-spacing: -0.8px;
+}
+
+/* Active employees — teal */
+.dashboard-stats > :nth-child(1)::before,
+.stats-grid > :nth-child(1)::before,
+.metrics-grid > :nth-child(1)::before,
+.summary-grid > :nth-child(1)::before,
+.analytics-summary > :nth-child(1)::before,
+.alert-summary > :nth-child(1)::before,
+.kpi-grid > :nth-child(1)::before {
+  background: linear-gradient(90deg, #0d9488, #5eead4);
+}
+
+/* High-risk predictions — red */
+.dashboard-stats > :nth-child(2)::before,
+.stats-grid > :nth-child(2)::before,
+.metrics-grid > :nth-child(2)::before,
+.summary-grid > :nth-child(2)::before,
+.analytics-summary > :nth-child(2)::before,
+.alert-summary > :nth-child(2)::before,
+.kpi-grid > :nth-child(2)::before {
+  background: linear-gradient(90deg, #e5484d, #fda4af);
+}
+
+/* Unread alerts — amber */
+.dashboard-stats > :nth-child(3)::before,
+.stats-grid > :nth-child(3)::before,
+.metrics-grid > :nth-child(3)::before,
+.summary-grid > :nth-child(3)::before,
+.analytics-summary > :nth-child(3)::before,
+.alert-summary > :nth-child(3)::before,
+.kpi-grid > :nth-child(3)::before {
+  background: linear-gradient(90deg, #d97706, #fcd34d);
+}
+
+/* Keep the surrounding dashboard sections consistent */
+.workspace-content h2,
+.workspace-content h3,
+main h2,
+main h3 {
+  color: #172b4d;
+  letter-spacing: -0.35px;
+}
+
+.workspace-content button,
+main button {
+  border-radius: 9px;
+  font-weight: 600;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.workspace-content button:hover,
+main button:hover {
+  box-shadow: 0 4px 12px rgba(25, 42, 70, 0.08);
+}
+
+/* Responsive layout */
+@media (max-width: 900px) {
+  .dashboard-stats,
+  .stats-grid,
+  .metrics-grid,
+  .summary-grid,
+  .analytics-summary,
+  .alert-summary,
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+}
+
+@media (max-width: 560px) {
+  .dashboard-stats,
+  .stats-grid,
+  .metrics-grid,
+  .summary-grid,
+  .analytics-summary,
+  .alert-summary,
+  .kpi-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .dashboard-stats > *,
+  .stats-grid > *,
+  .metrics-grid > *,
+  .summary-grid > *,
+  .analytics-summary > *,
+  .alert-summary > *,
+  .kpi-grid > * {
+    min-height: 100px;
+    padding: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-stats > *,
+  .stats-grid > *,
+  .metrics-grid > *,
+  .summary-grid > *,
+  .analytics-summary > *,
+  .alert-summary > *,
+  .kpi-grid > * {
+    transition: none;
+  }
+}
